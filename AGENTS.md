@@ -12,12 +12,12 @@
 - The repository-specific guidance for agents lives in this file.
 
 ## Repository snapshot
-- Gradle root name is `VCAM`, but the Android package is `io.github.zensu357.camswap`.
+- Gradle root name is `VCAM`, and the Android package is `io.github.alanlaw.vfc`.
 - The only Gradle module is `:app`.
-- Host UI entry point: `app/src/main/java/io/github/zensu357/camswap/MainActivity.kt`.
-- Xposed entry declaration: `app/src/main/assets/xposed_init`.
-- Xposed entry class: `io.github.zensu357.camswap.HookMain`.
-- Provider authority: `io.github.zensu357.camswap.provider`.
+- Host UI entry point: `app/src/main/java/io/github/alanlaw/vfc/MainActivity.kt`.
+- Xposed entry declaration: `app/src/main/resources/META-INF/xposed/java_init.list`.
+- Xposed entry class: `io.github.alanlaw.vfc.Api101ModuleMain`.
+- Provider authority: `io.github.alanlaw.vfc.provider`.
 - Config and media are centered around `DCIM/Camera1/`, with config file `cs_config.json`.
 - Documentation hub: `docs/README.md`.
 
@@ -31,7 +31,7 @@
 - `VideoProvider` and `ConfigReceiver` support cross-process config and media delivery.
 - `CameraServerBridge`, `cs_camserver` (native so), and `cs-injector` (root binary) provide the Scheme 2 bottom-layer CameraServer injection pipeline.
 - `ResidualCleaner` provides risk residual and leftover path scanning and cleanup.
-- Host UI is Compose-based and lives under `app/src/main/java/io/github/zensu357/camswap/ui/`.
+- Host UI is Compose-based and lives under `app/src/main/java/io/github/alanlaw/vfc/ui/`.
 
 ## Toolchain and versions
 - Gradle wrapper: 8.11.1.
@@ -44,22 +44,22 @@
 - Native code is compiled as C++17 with `-fno-exceptions -fno-rtti`.
 
 ## Build commands
-- Recommended JDK: **JDK 21** (`C:\Program Files\Java\jdk-21`). Set `$env:JAVA_HOME="C:\Program Files\Java\jdk-21"` if default JDK differs.
+- Recommended JDK: **JDK 17**. Set `JAVA_HOME` for the current shell if the system default differs.
 - On Windows use `gradlew.bat`; on Unix-like shells use `./gradlew`.
 - Build debug APK: `gradlew.bat assembleDebug`.
 - Build only the app debug variant: `gradlew.bat :app:assembleDebug`.
 - Build release APK: `gradlew.bat assembleRelease`.
 - Run full clean + build: `gradlew.bat clean assembleDebug`.
 - Run JVM unit tests: `gradlew.bat :app:testDebugUnitTest`.
-- Run one JVM test class: `gradlew.bat :app:testDebugUnitTest --tests "io.github.zensu357.camswap.ConfigManagerTest"`.
+- Run one JVM test class: `./gradlew :app:testDebugUnitTest --tests "io.github.alanlaw.vfc.PresetConfigManagerTest"`.
 - APK outputs land under `app/build/outputs/apk/`.
 
 ## Test reality check
-- JVM tests exist under `app/src/test/java/io/github/zensu357/camswap/` and cover `ConfigManagerTest` and `VideoProviderTest`.
+- JVM tests exist under `app/src/test/java/io/github/alanlaw/vfc/` and cover configuration, rendering, Provider validation, and import safety.
 - Instrumentation tests under `app/src/androidTest/` are currently stale.
 
 ## Important gotchas
-- JDK requirement: Use **JDK 21**. Newer preview JDKs (e.g. JDK 26) may fail on TLS handshake or Gradle daemon compatibility.
+- JDK requirement: Use **JDK 17**. Newer preview JDKs may fail on Gradle daemon compatibility.
 - The native build depends on the Dobby submodule at `app/src/main/cpp/third_party/Dobby`. If missing, run `git submodule update --init --recursive`.
 - Native CMake targets include `camswap-native-hook` (OpenSL/AAudio), `cs_camserver` (CameraServer hook), and `cs-injector` (root binary).
 - In Android Bionic NDK, shared memory mapping must use standard POSIX `open()` and `mmap()`, not `shm_open()`.
@@ -70,7 +70,7 @@
 ## Editing guidance
 - Read the surrounding file first and follow the local style.
 - Keep changes tight and targeted; avoid unnecessary renames or package moves.
-- Preserve package names, config keys, intent actions, provider authorities, and Xposed hook signatures.
+- Keep the new package name, config keys, intent actions, provider authority, and Xposed hook signatures internally consistent.
 - Indentation: 4 spaces for Kotlin, Java, Groovy, XML, C++.
 - Fail safely in hooks: prefer logging and graceful fallback over crashing the target application.
 

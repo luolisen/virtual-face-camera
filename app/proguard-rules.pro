@@ -5,11 +5,11 @@
 -adaptresourcefilecontents META-INF/xposed/scope.list
 
 # Keep LibXposed entry points
--keep class io.github.zensu357.camswap.Api101ModuleMain { *; }
+-keep class io.github.alanlaw.vfc.Api101ModuleMain { *; }
 -keep class io.github.libxposed.** { *; }
 
 # Keep Application Classes
--keep class io.github.zensu357.camswap.** { *; }
+-keep class io.github.alanlaw.vfc.** { *; }
 
 # Android Components
 -keep public class * extends android.app.Activity

@@ -7,7 +7,6 @@
     <string name="Warning">Strictly prohibited for illegal use!! Users bear all responsibilities and consequences!!</string>
     <string name="switch1">Force Show Permission Warning</string>
     <string name="switch2">Temporarily Disable Module (Enable to disable)</string>
-    <string name="switch3">Play Video Sound</string>
     <string name="switch4">Force Private Directory for All Apps</string>
     <string name="gitee" translatable="false">Go to Gitee Repo (China optimized)</string>
     <string name="switch5">Disable Toast Messages</string>
@@ -26,8 +25,6 @@
     <string name="status_paused">Paused</string>
     <string name="status_label_video">Source</string>
     <string name="status_label_play_mode">Mode</string>
-    <string name="status_label_mic">Mic</string>
-    <string name="status_label_video_sound">Video Audio</string>
     <string name="status_label_notification">Notification</string>
     <string name="status_label_target_apps">Target Apps</string>
     <string name="status_value_on">On</string>
@@ -35,19 +32,14 @@
     <string name="status_value_random">Random Mode</string>
     <string name="status_value_random_play">Random Play</string>
     <string name="status_value_sequential_play">Sequential Play</string>
-    <string name="status_value_mic_mute">Mute</string>
-    <string name="status_value_mic_replace">Audio Replace</string>
-    <string name="status_value_mic_sync">Video Sync</string>
     <string name="status_value_all_apps">All Apps</string>
 
     <!-- Manage Screen -->
     <string name="tab_video_manage">Video Manage</string>
     <string name="tab_image_manage">Image Manage</string>
-    <string name="tab_audio_manage">Audio Manage</string>
     <string name="desc_add_media">Add Media</string>
     <string name="stats_video_format">Total: %1$d | Size: %2$.2f MB | Duration: %3$s</string>
     <string name="stats_image_format">Total: %1$d | Size: %2$.2f MB</string>
-    <string name="stats_audio_format">Total: %1$d | Size: %2$.2f MB</string>
 
     <!-- Settings Screen -->
     <string name="settings_category_mode">Mode Switch</string>
@@ -57,16 +49,6 @@
     <string name="settings_overlay_control">Enable Floating Overlay Control</string>
     <string name="settings_overlay_control_desc">Show a draggable bubble with five fixed video shortcuts</string>
     <string name="settings_overlay_permission_desc">Overlay permission is required to show the floating control bubble</string>
-    <string name="settings_play_sound">Play Sound</string>
-    <string name="settings_play_sound_desc">Play original audio when replacing</string>
-    <string name="settings_mic_hook">Microphone Hook</string>
-    <string name="settings_mic_hook_desc">Hook mic input to replace or mute audio</string>
-    <string name="mic_mode_mute">Mute Mode</string>
-    <string name="mic_mode_mute_desc">Output silent data, no sound heard</string>
-    <string name="mic_mode_replace">Audio Replace</string>
-    <string name="mic_mode_replace_desc">Inject custom audio file (Put Mic.mp3 in DCIM/Camera1/)</string>
-    <string name="mic_mode_video_sync">Video Sync</string>
-    <string name="mic_mode_video_sync_desc">Play audio track of current video</string>
     <string name="settings_random_play">Random Play</string>
     <string name="settings_random_play_desc">Randomly play from video list</string>
     <string name="settings_video_display">Video Display</string>
@@ -121,7 +103,7 @@
 
     <!-- Navigation -->
     <string name="nav_home">Home</string>
-    <string name="nav_manage">Manage</string>
+    <string name="nav_manage">Media Library</string>
     <string name="nav_settings">Settings</string>
 
     <!-- Language -->
@@ -144,8 +126,8 @@
     <string name="notif_action_prev">Previous</string>
     <string name="notif_action_next">Next</string>
     <string name="notif_action_exit">Exit</string>
-    <string name="notif_channel_name">Camswap Control Service</string>
-    <string name="notif_channel_desc">Show Camswap video control</string>
+    <string name="notif_channel_name">Virtual Face Camera Control Service</string>
+    <string name="notif_channel_desc">Show Virtual Face Camera video control</string>
     <string name="overlay_action_rotate">Rotate</string>
     <string name="overlay_action_close">Close</string>
 
@@ -194,7 +176,7 @@
 
     <!-- Toast / Migration -->
     <string name="config_migrated">Configuration migrated automatically</string>
-    <string name="root_permission_required">Please grant Root permission to CamSwap in your Root Manager (Magisk/KernelSU)</string>
+    <string name="root_permission_required">Please grant Root permission to Virtual Face Camera in your Root Manager (Magisk/KernelSU)</string>
     <string name="requesting_root_permission">Requesting Root permission, please tap Grant...</string>
     <string name="root_mode_activated">Root permission granted! Root mode activated.</string>
     <string name="root_inject_failed_tip">CameraServer injection pending. Ensure SELinux is Permissive and retry.</string>

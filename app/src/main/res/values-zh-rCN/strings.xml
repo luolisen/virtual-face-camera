@@ -5,7 +5,6 @@
     <string name="Warning">请勿用于非法用途，所有后果自负!</string>
     <string name="switch1">强制显示权限缺失提示</string>
     <string name="switch2">临时关闭模块</string>
-    <string name="switch3">播放视频声音</string>
     <string name="switch4">强制每个应用程序使用私有目录（无论权限如何）</string>
     <string name="switch5">关闭提示消息</string>
     <string name="permission_lack_warn">无权限</string>
@@ -14,7 +13,7 @@
     <string name="negative">拒绝</string>
     <string name="settings_title">设置</string>
     <string name="settings_category_mode">模式切换</string>
-    <string name="root_permission_required">请在 Root 管理器（Magisk/面具/KernelSU）中允许 CamSwap 获取 Root 权限</string>
+    <string name="root_permission_required">请在 Root 管理器（Magisk/面具/KernelSU）中允许 Virtual Face Camera 获取 Root 权限</string>
     <string name="requesting_root_permission">正在主动申请 Root 权限，请在授权弹窗中点击允许...</string>
     <string name="root_mode_activated">Root 权限已获取，已成功激活 Root 模式！</string>
     <string name="root_inject_failed_tip">CameraServer 注入未就绪，请确保 SELinux 为 Permissive 模式后重试</string>

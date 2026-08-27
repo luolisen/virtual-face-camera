@@ -21,7 +21,7 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* /*reserved*/) {
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_io_github_zensu357_camswap_NativeAudioHook_nativeInit(JNIEnv* env, jclass clazz) {
+Java_io_github_alanlaw_vfc_NativeAudioHook_nativeInit(JNIEnv* env, jclass clazz) {
     LOGI("nativeInit called");
 
     // 在 nativeInit 中初始化 bridge，此时 classloader 上下文正确（Xposed 模块的 classloader）
@@ -36,7 +36,7 @@ Java_io_github_zensu357_camswap_NativeAudioHook_nativeInit(JNIEnv* env, jclass c
 
 extern "C"
 JNIEXPORT void JNICALL
-Java_io_github_zensu357_camswap_NativeAudioHook_nativeRelease(JNIEnv* /*env*/, jclass /*clazz*/) {
+Java_io_github_alanlaw_vfc_NativeAudioHook_nativeRelease(JNIEnv* /*env*/, jclass /*clazz*/) {
     LOGI("nativeRelease called");
     // Dobby hooks persist until process exit; nothing to undo
 }
@@ -48,7 +48,7 @@ static CameraFramePacket* g_writer_packet = nullptr;
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_io_github_zensu357_camswap_utils_CameraServerBridge_nativeInitShm(JNIEnv* /*env*/, jclass /*clazz*/) {
+Java_io_github_alanlaw_vfc_utils_CameraServerBridge_nativeInitShm(JNIEnv* /*env*/, jclass /*clazz*/) {
     if (!g_writer_packet) {
         g_writer_packet = CsShmManager::openWriter();
     }
@@ -57,7 +57,7 @@ Java_io_github_zensu357_camswap_utils_CameraServerBridge_nativeInitShm(JNIEnv* /
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_io_github_zensu357_camswap_utils_CameraServerBridge_nativePushFrame(
+Java_io_github_alanlaw_vfc_utils_CameraServerBridge_nativePushFrame(
         JNIEnv* env, jclass /*clazz*/,
         jbyteArray frame_bytes, jint width, jint height, jint format,
         jint rotation, jfloat r, jfloat g, jfloat b, jfloat intensity) {
@@ -100,7 +100,7 @@ Java_io_github_zensu357_camswap_utils_CameraServerBridge_nativePushFrame(
 
 extern "C"
 JNIEXPORT void JNICALL
-Java_io_github_zensu357_camswap_utils_CameraServerBridge_nativeCloseShm(JNIEnv* /*env*/, jclass /*clazz*/) {
+Java_io_github_alanlaw_vfc_utils_CameraServerBridge_nativeCloseShm(JNIEnv* /*env*/, jclass /*clazz*/) {
     if (g_writer_packet) {
         CsShmManager::closeShm(g_writer_packet);
         g_writer_packet = nullptr;

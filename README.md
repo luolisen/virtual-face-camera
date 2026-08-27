@@ -1,110 +1,75 @@
 # Virtual Face Camera
 
-Virtual Face Camera is based on [Android CamSwap](https://github.com/zensu357/Android-CamSwap-OpenSource), using the upstream `v2.8` tag as its development baseline. The original package/namespace is intentionally retained for Xposed and IPC compatibility.
+Virtual Face Camera 0.2 是基于 [Android CamSwap](https://github.com/zensu357/Android-CamSwap-OpenSource) 开发的 Android Xposed/LSPosed 虚拟摄像头模块，准确基线为上游 `v2.8`。本项目保留上游 GPL-3.0 许可证和版权信息，并感谢 [android_virtual_cam](https://github.com/w2016561536/android_virtual_cam) 的代码与思路启发。
 
-Upstream source: [zensu357/Android-CamSwap-OpenSource](https://github.com/zensu357/Android-CamSwap-OpenSource)
-感谢项目 [android_virtual_cam](https://github.com/w2016561536/android_virtual_cam) 为本项目提供的灵感和代码基础。
+项目仓库：[luolisen/virtual-face-camera](https://github.com/luolisen/virtual-face-camera)
 
-Android CamSwap 是一个基于 Xposed 框架的虚拟摄像头模块。它能够拦截 Android 系统相机的预览和拍照请求，并将预览画面替换为用户指定的视频。
+## 身份
 
-本项目采用现代化的 Android 开发技术栈（Kotlin, Jetpack Compose）重构，并引入了基于 ContentProvider 的跨进程数据传输机制，兼容高版本 Android (11+) 的文件权限隔离。
+- 应用名称：Virtual Face Camera
+- 版本：`0.2`（`versionCode 2`）
+- package / namespace：`io.github.alanlaw.vfc`
+- Provider authority：`io.github.alanlaw.vfc.provider`
 
-旧版 v2.0 及之前版本的实现细节以历史提交为准，当前分支已完成重构与结构调整。
+## 功能
 
-## ✨ 主要功能
+- Camera1 / Camera2 虚拟摄像头替换
+- LSPosed 注入
+- 视频实时替换与指定视频热切换
+- FIT（完整显示、保持比例、黑边填充）/ CROP（保持比例、铺满裁切）
+- 0° / 90° / 180° / 270° 实时旋转
+- 多预设：每个预设固定包含“点、左、右、张、眨”五个视频槽位
+- App 内创建、重命名、删除和切换当前预设
+- 通过 Android 系统媒体选择器导入并直接绑定视频
+- 悬浮窗附近切换当前预设，固定五键热切换
 
-*   **全 API 支持**：同时支持 Camera1 (Camera) 和 Camera2 (CameraDevice) API。
-*   **视频替换预览** 🎥：将相机预览画面无缝替换为指定的 MP4 视频。
-*   **音频替换** 🎤：可选择播放自定义 MP3 音频文件，或与替换视频同步。
-*   **画面适配**：
-    *   **FIT / 完整显示**：保持原始宽高比，使用黑边填充多余区域。
-    *   **CROP / 填满裁切**：保持原始宽高比，铺满目标 Surface 并裁切超出部分。
-*   **实时旋转**：支持 0°、90°、180°、270°，切换时不重启目标应用或 Camera session。
-*   **五键悬浮窗快捷切换**：固定顺序为 **点、左、右、张、眨**。
-*   **App 内快捷键绑定**：在 Virtual Face Camera 设置中为五个按键分别选择或解除绑定视频。
-*   **通知栏实时控制**：
-    *   ⏭ 切换到下一个 / 上一个视频。
-    *   🔄 快速调整视频旋转方向（+90° / -90°）。
-    *   🎲 随机播放模式。
-*   **自动旋转处理**：读取视频元数据中的旋转角度，通过 OpenGL ES 正确渲染，无需手动处理。
-*   **跨进程配置同步**：
-    *   主路径：ContentProvider IPC（无需目标应用存储权限）。
-    *   回退路径：直接文件读取 + Application 冷启动预热，彻底解决冷启动时配置未就绪问题。
-*   **目标应用过滤**：可指定模块仅在特定应用中生效。
-*   **现代化 UI**：基于 Material Design 3 和 Jetpack Compose 构建的管理界面。
-*   **直播推流**：exoplayer + 拓展，支持RTSP/HLS/DASH和RTMP/RTP协议。
-  
-## 📱 环境要求
+固定快捷键顺序：
 
-*   **Android 版本**：Android 8.0 (API 26) 及以上（推荐 Android 11+）
-*   **Root 权限**：必须
-*   **Xposed 框架**：推荐使用 [LSPosed](https://github.com/LSPosed/LSPosed)（Zygisk / Riru 版本均可），[注意：v2.5版本及以上不再支持lsp1.0]
+`点` | `左` | `右` | `张` | `眨`
 
-## 🚀 安装与使用
+## 构建环境
 
-### 1. 安装模块
-1. 下载最新版本的 Release APK。
-   *   推荐优先选择与你设备架构匹配的包：大多数设备使用 `arm64-v8a`。
-2. 安装到你的 Android 设备。
-3. 在 **LSPosed 管理器**中启用该模块。
-4. **作用域勾选**：  
-    *   勾选你需要进行替换的**目标应用**（如相机、微信、抖音等）。
+- JDK 17
+- Android SDK Platform 36
+- Android Build Tools（由 Gradle 实际解析）
+- NDK `25.1.8937393`
+- CMake `3.22.1`
+- Gradle Wrapper `8.11.1`
 
-5. 重启目标应用的进程。
+项目使用 ABI split，Release 会按实际配置生成 `arm64-v8a`、`armeabi-v7a` 和 `x86_64` APK。
 
-### 2. 配置素材
-1. 打开 **Virtual Face Camera** 应用，授予必要的文件读写权限。
-2. 在「管理」页面导入你的 MP4 视频素材。
-3. 在「设置」页面选择默认视频、画面适配模式、五键绑定、音频替换和通知栏控制等选项。
-
-### 3. 开始使用
-打开任意调用相机的应用，预览画面将被替换为你选择的视频。
-
-> **提示**：若视频画面方向不正确，可在通知栏使用旋转按钮微调，或在设置中手动填写旋转偏移角度。
-
-## 🛠️ 构建
-
-当前项目基于以下 Android 构建环境验证：
-
-*   JDK 17
-*   Android SDK Platform 36
-*   NDK `25.1.8937393`
-*   CMake `3.22.1`
-*   Gradle Wrapper `8.11.1`
-
-标准构建命令：
+标准命令：
 
 ```bash
 ./gradlew assembleRelease
 ```
 
-项目使用 ABI split，会按实际配置生成 `arm64-v8a`、`armeabi-v7a` 和 `x86_64` release APK。安装匹配设备架构的 APK 后，再按设备上的 LSPosed 管理器流程启用模块；项目不会自动修改作用域、卸载已有模块或重启设备。
+Release 必须使用本机正式签名配置。签名 keystore 和密码不属于仓库内容；请在本机 `local.properties` 配置 `storeFile`、`storePassword`、`keyAlias`、`keyPassword`，不要把密码提交或分享。
 
-## 📁 配置文件
+## 安装与启用
 
-模块的配置存储在以下路径（JSON 格式）：
-```
+1. 从 [Releases](https://github.com/luolisen/virtual-face-camera/releases) 下载与你设备 ABI 匹配的 APK，通常为 `arm64-v8a`。
+2. 安装后在 LSPosed 管理器中手动启用 **Virtual Face Camera**。
+3. 为实际目标应用重新勾选 LSPosed 作用域，然后按目标应用需要重新启动目标进程。
+4. 打开 Virtual Face Camera，在“媒体库”中创建预设，展开预设后点击五个槽位之一，使用系统媒体选择器导入并完成绑定。
+5. 在“设置”中选择 FIT/CROP 和悬浮窗开关。
+
+本版本更换了 applicationId。旧版 `io.github.zensu357.camswap` 不会被自动卸载或修改作用域；新包需要人工重新启用。旧 App 与新 App 不建议同时运行，因为历史媒体目录和配置文件可能共享。
+
+配置与受管理视频仍位于：
+
+```text
+/sdcard/DCIM/Camera1/
 /sdcard/DCIM/Camera1/cs_config.json
 ```
 
-目标视频文件也应放置在该目录下。模块重启后会自动读取。
+## 链接
 
+- GitHub：[https://github.com/luolisen/virtual-face-camera](https://github.com/luolisen/virtual-face-camera)
+- Releases：[https://github.com/luolisen/virtual-face-camera/releases](https://github.com/luolisen/virtual-face-camera/releases)
+- Telegram：[https://t.me/virtualfacecarema](https://t.me/virtualfacecarema)
+- Upstream：[https://github.com/zensu357/Android-CamSwap-OpenSource](https://github.com/zensu357/Android-CamSwap-OpenSource)
 
-## 🤝 贡献
+## 许可证
 
-欢迎提交 Issue 和 Pull Request！
-
-
-本项目仅供**安全研究、软件测试和教育目的**使用。  
-请勿将本项目用于任何非法用途（包括但不限于人脸识别绕过、身份欺诈等）。  
-使用者需自行承担因使用本项目而产生的一切法律责任。
-
-## ❤️ 支持
-
-如果本项目对你有帮助，请点 ⭐ Star 支持！
-
-![Star History](https://api.star-history.com/svg?repos=zensu357/Android-CamSwap-OpenSource&type=20260219)
-
-## 📄 许可证
-
-本项目基于 [GPL-3.0 license](LICENSE) 开源。
+本项目继续遵守 [GPL-3.0](LICENSE)。

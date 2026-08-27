@@ -4,39 +4,43 @@ plugins {
     id 'org.jetbrains.kotlin.plugin.compose' version '2.1.0'
 }
 
+def releaseSigningProperties = new Properties()
+def releaseSigningPropertiesFile = rootProject.file("local.properties")
+if (releaseSigningPropertiesFile.exists()) {
+    releaseSigningProperties.load(releaseSigningPropertiesFile.newDataInputStream())
+}
+def releaseSigningKeys = ["storeFile", "storePassword", "keyAlias", "keyPassword"]
+def hasFormalReleaseSigning = releaseSigningKeys.every { key ->
+    def value = releaseSigningProperties.getProperty(key)
+    value != null && !value.trim().isEmpty()
+}
+
 android {
-    namespace 'io.github.zensu357.camswap'
+    namespace 'io.github.alanlaw.vfc'
     compileSdk 36
     ndkVersion '25.1.8937393'
 
-    // Auto-versioning logic
+    // BUILD_TIME is diagnostic metadata only; the public app version is fixed below.
     def date = new Date()
     def buildTime = date.format('yyyy-MM-dd HH:mm:ss')
-    def versionSuffix = date.format('MMddHHmm')
-    def versionCodeInt = date.format('yyMMddHH').toInteger()
 
     signingConfigs {
         release {
-            Properties properties = new Properties()
-            if (rootProject.file("local.properties").exists()) {
-                properties.load(rootProject.file("local.properties").newDataInputStream())
-            }
-
-            if (properties.containsKey("storeFile")) {
-                storeFile file(properties.getProperty("storeFile"))
-                storePassword properties.getProperty("storePassword")
-                keyAlias properties.getProperty("keyAlias")
-                keyPassword properties.getProperty("keyPassword")
+            if (hasFormalReleaseSigning) {
+                storeFile file(releaseSigningProperties.getProperty("storeFile"))
+                storePassword releaseSigningProperties.getProperty("storePassword")
+                keyAlias releaseSigningProperties.getProperty("keyAlias")
+                keyPassword releaseSigningProperties.getProperty("keyPassword")
             }
         }
     }
 
     defaultConfig {
-        applicationId "io.github.zensu357.camswap"
+        applicationId "io.github.alanlaw.vfc"
         minSdk 26
         targetSdk 36
-        versionCode versionCodeInt
-        versionName "2.8.${versionSuffix}"
+        versionCode 2
+        versionName "0.2"
 
         // Inject build time into BuildConfig
         buildConfigField "String", "BUILD_TIME", "\"${buildTime}\""
@@ -70,11 +74,7 @@ android {
 
     buildTypes {
         release {
-            if (signingConfigs.release.storeFile) {
-                signingConfig signingConfigs.release
-            } else {
-                signingConfig signingConfigs.debug
-            }
+            signingConfig signingConfigs.release
             minifyEnabled false
             shrinkResources false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
@@ -102,6 +102,35 @@ android {
             include 'arm64-v8a', 'armeabi-v7a', 'x86_64'
             universalApk false
         }
+    }
+}
+
+// Keep debug builds usable without a local secret, but make every release task
+// fail closed when the formal signing material is missing or unreadable.
+def verifyReleaseSigning = tasks.register("verifyReleaseSigning") {
+    doLast {
+        def properties = new Properties()
+        def propertiesFile = rootProject.file("local.properties")
+        if (propertiesFile.exists()) {
+            properties.load(propertiesFile.newDataInputStream())
+        }
+        def missing = releaseSigningKeys.findAll { key ->
+            def value = properties.getProperty(key)
+            value == null || value.trim().isEmpty()
+        }
+        if (!missing.isEmpty()) {
+            throw new GradleException("Formal release signing is required; missing local.properties keys: " + missing)
+        }
+        def keystore = file(properties.getProperty("storeFile"))
+        if (!keystore.isFile()) {
+            throw new GradleException("Formal release keystore does not exist: " + keystore.absolutePath)
+        }
+    }
+}
+
+tasks.configureEach { task ->
+    if (task.name == "preReleaseBuild" || task.name == "validateSigningRelease") {
+        task.dependsOn(verifyReleaseSigning)
     }
 }
 

@@ -7,7 +7,6 @@
     <string name="Warning">严禁用于任何非法用途！！使用者需自行承担所有责任与后果！！</string>
     <string name="switch1">强制显示权限缺失警告</string>
     <string name="switch2">临时禁用模块（开启即禁用）</string>
-    <string name="switch3">播放视频声音</string>
     <string name="switch4">强制所有应用使用私有目录</string>
     <string name="gitee" translatable="false">前往 Gitee 仓库（国内加速）</string>
     <string name="switch5">禁用 Toast 提示信息</string>
@@ -26,8 +25,6 @@
     <string name="status_paused">已暂停</string>
     <string name="status_label_video">视频源</string>
     <string name="status_label_play_mode">播放模式</string>
-    <string name="status_label_mic">麦克风</string>
-    <string name="status_label_video_sound">视频原声</string>
     <string name="status_label_notification">通知控制</string>
     <string name="status_label_target_apps">目标应用</string>
     <string name="status_value_on">开启</string>
@@ -35,19 +32,29 @@
     <string name="status_value_random">随机模式</string>
     <string name="status_value_random_play">随机播放</string>
     <string name="status_value_sequential_play">顺序播放</string>
-    <string name="status_value_mic_mute">静音</string>
-    <string name="status_value_mic_replace">音频替换</string>
-    <string name="status_value_mic_sync">视频同步</string>
     <string name="status_value_all_apps">全部应用</string>
 
     <!-- Manage Screen -->
     <string name="tab_video_manage">媒体库</string>
     <string name="tab_image_manage">图片管理</string>
-    <string name="tab_audio_manage">音频管理</string>
     <string name="desc_add_media">添加媒体</string>
     <string name="stats_video_format">总计: %1$d | 大小: %2$.2f MB | 时长: %3$s</string>
     <string name="stats_image_format">总计: %1$d | 大小: %2$.2f MB</string>
-    <string name="stats_audio_format">总计: %1$d | 大小: %2$.2f MB</string>
+    <string name="presets_title">预设</string>
+    <string name="no_presets">暂无预设</string>
+    <string name="no_presets_desc">创建预设后，为点、左、右、张、眨绑定视频</string>
+    <string name="create_preset">创建预设</string>
+    <string name="current_preset">当前</string>
+    <string name="rename_preset">重命名</string>
+    <string name="rename_preset_title">重命名预设</string>
+    <string name="preset_name_label">预设名称</string>
+    <string name="preset_name_required">预设名称不能为空</string>
+    <string name="delete_preset">删除预设</string>
+    <string name="delete_preset_title">删除预设</string>
+    <string name="delete_preset_message">确定删除「%1$s」吗？已导入的视频文件不会删除。</string>
+    <string name="delete_preset_confirm">删除</string>
+    <string name="preset_binding_actions">绑定操作</string>
+    <string name="preset_video_import_failed">视频导入失败，请选择可用的视频文件</string>
 
     <!-- Settings Screen -->
     <string name="settings_category_mode">模式切换</string>
@@ -57,16 +64,6 @@
     <string name="settings_overlay_control">启用悬浮窗控制</string>
     <string name="settings_overlay_control_desc">显示可拖动悬浮球，展开后使用五个固定快捷键切换视频</string>
     <string name="settings_overlay_permission_desc">需要授予悬浮窗权限才能显示控制球</string>
-    <string name="settings_play_sound">播放声音</string>
-    <string name="settings_play_sound_desc">替换视频时播放原声音频</string>
-    <string name="settings_mic_hook">麦克风 Hook</string>
-    <string name="settings_mic_hook_desc">Hook 麦克风输入，替换或静音目标应用的音频采集</string>
-    <string name="mic_mode_mute">静音模式</string>
-    <string name="mic_mode_mute_desc">输出静音数据，目标无法听到任何声音</string>
-    <string name="mic_mode_replace">音频替换</string>
-    <string name="mic_mode_replace_desc">注入自定义音频文件（放置 Mic.mp3 到 DCIM/Camera1/）</string>
-    <string name="mic_mode_video_sync">视频同步</string>
-    <string name="mic_mode_video_sync_desc">播放当前替换视频的原声音轨</string>
     <string name="settings_random_play">随机播放</string>
     <string name="settings_random_play_desc">从视频列表中随机选择视频播放</string>
     <string name="settings_video_display">视频显示</string>
@@ -84,7 +81,10 @@
     <string name="settings_shortcut_bind_title">绑定「%1$s」</string>
     <string name="shortcut_unbind">解除绑定</string>
     <string name="shortcut_no_videos">当前媒体库没有可用视频</string>
-    <string name="overlay_shortcut_unbound">请先在 App 中绑定「%1$s」</string>
+    <string name="overlay_preset">预设</string>
+    <string name="overlay_no_presets">暂无预设，请先在 App 中创建</string>
+    <string name="overlay_preset_switched">已切换到「%1$s」</string>
+    <string name="overlay_shortcut_unbound">请先为当前预设的「%1$s」绑定视频</string>
     <string name="overlay_shortcut_select_failed">视频不可用或已被移除</string>
     <string name="settings_category_advanced">高级设置</string>
     <string name="settings_disable_module">禁用模块</string>
@@ -92,7 +92,7 @@
 
     <!-- Navigation -->
     <string name="nav_home">首页</string>
-    <string name="nav_manage">管理</string>
+    <string name="nav_manage">媒体库</string>
     <string name="nav_settings">设置</string>
 
     <!-- Additional Settings -->
@@ -144,8 +144,8 @@
     <string name="notif_action_prev">上一条</string>
     <string name="notif_action_next">下一条</string>
     <string name="notif_action_exit">退出</string>
-    <string name="notif_channel_name">Camswap控制服务</string>
-    <string name="notif_channel_desc">显示Camswap视频切换控制</string>
+    <string name="notif_channel_name">Virtual Face Camera 控制服务</string>
+    <string name="notif_channel_desc">显示 Virtual Face Camera 视频切换控制</string>
     <string name="overlay_action_rotate">旋转</string>
     <string name="overlay_action_close">关闭</string>
 
@@ -158,8 +158,8 @@
     <string name="status_module_inactive">模块未激活</string>
     <string name="status_activate_hint">请在 Xposed 管理器中激活模块后重启app</string>
     <string name="status_grant_permission">授予权限</string>
-    <string name="status_add_video_hint">请在管理页面添加视频</string>
-    <string name="status_select_video_hint">请在管理页面选择视频</string>
+    <string name="status_add_video_hint">请在管理页面创建预设并绑定视频</string>
+    <string name="status_select_video_hint">请在管理页面的预设中绑定并选择视频</string>
     <string name="status_no_image">未添加图片</string>
     <string name="status_no_image_selection">未选择图片</string>
     <string name="status_add_image_hint">请在管理页面的「图片」 Tab 中添加图片</string>
@@ -194,7 +194,7 @@
 
     <!-- Toast / Migration -->
     <string name="config_migrated">配置已自动迁移</string>
-    <string name="root_permission_required">请在 Root 管理器（Magisk/面具/KernelSU）中允许 CamSwap 获取 Root 权限</string>
+    <string name="root_permission_required">请在 Root 管理器（Magisk/面具/KernelSU）中允许 Virtual Face Camera 获取 Root 权限</string>
     <string name="requesting_root_permission">正在主动申请 Root 权限，请在授权弹窗中点击允许...</string>
     <string name="root_mode_activated">Root 权限已获取，已成功激活 Root 模式！</string>
     <string name="root_inject_failed_tip">CameraServer 注入未就绪，请确保 SELinux 为 Permissive 模式后重试</string>

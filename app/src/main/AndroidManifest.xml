@@ -33,13 +33,13 @@
         
         <provider
             android:name=".VideoProvider"
-            android:authorities="io.github.zensu357.camswap.provider"
+            android:authorities="io.github.alanlaw.vfc.provider"
             android:exported="true"
             android:grantUriPermissions="true" />
 
         <receiver android:name=".ConfigReceiver" android:exported="true">
             <intent-filter>
-                <action android:name="io.github.zensu357.camswap.ACTION_REQUEST_CONFIG" />
+                <action android:name="io.github.alanlaw.vfc.ACTION_REQUEST_CONFIG" />
             </intent-filter>
         </receiver>
     </application>

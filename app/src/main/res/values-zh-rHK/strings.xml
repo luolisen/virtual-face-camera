@@ -5,7 +5,6 @@
     <string name="Warning">請勿用於非法用途，所有後果自負！</string>
     <string name="switch2">臨時關閉模組</string>
     <string name="switch1">強制顯示許可權缺失提示</string>
-    <string name="switch3">播放影片聲音</string>
     <string name="switch4">強制每個應用程序使用私有目錄（無論許可權如何）</string>
     <string name="switch5">關閉提示消息</string>
     <string name="permission_lack_warn">無許可權</string>
