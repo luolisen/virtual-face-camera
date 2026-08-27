@@ -31,6 +31,9 @@ import android.media.ImageReader.OnImageAvailableListener;
 import android.media.MediaMetadataRetriever;
 import android.os.SystemClock;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Matrix;
 import android.graphics.Rect;
 import java.io.ByteArrayOutputStream;
 import java.lang.reflect.Method;
@@ -375,15 +378,29 @@ public final class Camera2SessionHook {
                 previewSurface, previewSurface1);
         markYuvBridgeSessionReadyIfPossible();
 
-        // WhatsApp 视频通话：预览渲染器旋转设为 0°，让本机自拍画面方向正确。
-        // YUV 截帧时通过 captureFrameWithRotation 单独应用 video_rotation_offset，
-        // 确保对方看到正确方向。
-        if (isWhatsAppPackage(getCurrentPackageName()) && !whatsappYuvPumpMap.isEmpty()) {
-            MediaPlayerManager pm = HookMain.playerManager;
-            if (pm.c2_renderer != null) pm.c2_renderer.setRotation(0);
-            if (pm.c2_renderer_1 != null) pm.c2_renderer_1.setRotation(0);
-            LogUtil.log("【CS】WhatsApp 视频通话：预览渲染器旋转已设为 0°");
+        applyYuvPreviewRenderingConfig();
+    }
+
+    /**
+     * The WhatsApp/LINE YUV bridge has two distinct outputs: the app preview
+     * and the generated YUV frame. Keep the preview renderer at zero rotation,
+     * then apply the configured offset exactly once in captureFrameForYuv().
+     */
+    public void applyYuvPreviewRenderingConfig() {
+        if (!shouldUseFakeYuvBridgeForPackage(getCurrentPackageName())
+                || whatsappYuvPumpMap.isEmpty()) {
+            return;
         }
+        MediaPlayerManager pm = HookMain.playerManager;
+        if (pm.c2_renderer != null) pm.c2_renderer.setRotation(0);
+        if (pm.c2_renderer_1 != null) pm.c2_renderer_1.setRotation(0);
+        if (pm.c2_relay != null) pm.c2_relay.setRotation(0);
+        if (pm.c2_relay_1 != null) pm.c2_relay_1.setRotation(0);
+        if (pm.c2_reader_renderer != null) pm.c2_reader_renderer.setRotation(0);
+        if (pm.c2_reader_renderer_1 != null) pm.c2_reader_renderer_1.setRotation(0);
+        if (pm.c2_reader_relay != null) pm.c2_reader_relay.setRotation(0);
+        if (pm.c2_reader_relay_1 != null) pm.c2_reader_relay_1.setRotation(0);
+        LogUtil.log("【CS】YUV bridge 预览渲染器旋转保持 0°，偏移由 YUV/JPEG 截帧路径应用");
     }
 
     public void registerImageReaderSurface(Surface surface, int format, int width, int height) {
@@ -1181,6 +1198,7 @@ public final class Camera2SessionHook {
             pump = new YuvCallbackPump(imageReader);
             whatsappYuvPumpMap.put(imageReader, pump);
         }
+        applyYuvPreviewRenderingConfig();
         pump.listener = listenerObj;
         pump.onImageAvailableMethod = null;
         pump.targetHandler = handler;
@@ -1582,6 +1600,12 @@ public final class Camera2SessionHook {
         if (dec == null || !dec.isRunning()) {
             return null;
         }
+        // MediaCodec's raw YUV planes do not carry container orientation.
+        // Let the GL path handle metadata-rotated sources instead of emitting
+        // an unrotated frame to the YUV bridge.
+        if (dec.getVideoRotation() != 0) {
+            return null;
+        }
         MediaCodecYuvDecoder.YuvFrame decoded = dec.acquireLatestFrame();
         if (decoded == null) {
             return null;
@@ -1594,43 +1618,78 @@ public final class Camera2SessionHook {
                     nowMs, decoded.timestampNs, false);
         }
 
-        // 尺寸不匹配：缩放 YUV 平面
+        return resizeYuvFrame(decoded, width, height, nowMs);
+    }
+
+    private CachedYuvFrame resizeYuvFrame(MediaCodecYuvDecoder.YuvFrame decoded,
+            int dstW, int dstH, long nowMs) {
         int srcW = decoded.width;
         int srcH = decoded.height;
-        int dstW = width;
-        int dstH = height;
+        float srcAspect = srcW / (float) srcH;
+        float dstAspect = dstW / (float) dstH;
+        boolean crop = ConfigManager.ASPECT_MODE_CROP.equals(
+                VideoManager.getConfig().getString(
+                        ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_FIT));
+
+        int cropW = srcW;
+        int cropH = srcH;
+        int cropX = 0;
+        int cropY = 0;
+        int drawW = dstW;
+        int drawH = dstH;
+        int drawX = 0;
+        int drawY = 0;
+
+        if (crop && srcAspect > dstAspect) {
+            cropW = Math.max(2, ((int) (srcH * dstAspect)) & ~1);
+            cropX = Math.max(0, ((srcW - cropW) / 2) & ~1);
+        } else if (crop && srcAspect < dstAspect) {
+            cropH = Math.max(2, ((int) (srcW / dstAspect)) & ~1);
+            cropY = Math.max(0, ((srcH - cropH) / 2) & ~1);
+        } else if (!crop) {
+            float scale = Math.min(dstW / (float) srcW, dstH / (float) srcH);
+            drawW = Math.max(2, Math.min(dstW, ((int) (srcW * scale)) & ~1));
+            drawH = Math.max(2, Math.min(dstH, ((int) (srcH * scale)) & ~1));
+            drawX = Math.max(0, ((dstW - drawW) / 2) & ~1);
+            drawY = Math.max(0, ((dstH - drawH) / 2) & ~1);
+        }
 
         byte[] yOut = new byte[dstW * dstH];
-        int cDstW = dstW / 2;
-        int cDstH = dstH / 2;
-        byte[] uOut = new byte[cDstW * cDstH];
-        byte[] vOut = new byte[cDstW * cDstH];
+        byte[] uOut = new byte[(dstW / 2) * (dstH / 2)];
+        byte[] vOut = new byte[(dstW / 2) * (dstH / 2)];
+        Arrays.fill(yOut, (byte) 16);
+        Arrays.fill(uOut, (byte) 128);
+        Arrays.fill(vOut, (byte) 128);
 
-        // 最近邻缩放 Y 平面
-        for (int y = 0; y < dstH; y++) {
-            int srcY = y * srcH / dstH;
-            int srcRowOff = srcY * srcW;
-            int dstRowOff = y * dstW;
-            for (int x = 0; x < dstW; x++) {
-                yOut[dstRowOff + x] = decoded.yPlane[srcRowOff + x * srcW / dstW];
+        for (int y = 0; y < drawH; y++) {
+            int srcY = cropY + y * cropH / drawH;
+            int srcRowOffset = srcY * srcW;
+            int dstRowOffset = (drawY + y) * dstW + drawX;
+            for (int x = 0; x < drawW; x++) {
+                int srcX = cropX + x * cropW / drawW;
+                yOut[dstRowOffset + x] = decoded.yPlane[srcRowOffset + srcX];
             }
         }
 
-        // 最近邻缩放 U/V 平面
-        int cSrcW = srcW / 2;
-        int cSrcH = srcH / 2;
-        for (int y = 0; y < cDstH; y++) {
-            int srcY = y * cSrcH / cDstH;
-            int srcRowOff = srcY * cSrcW;
-            int dstRowOff = y * cDstW;
-            for (int x = 0; x < cDstW; x++) {
-                int srcX = x * cSrcW / cDstW;
-                uOut[dstRowOff + x] = decoded.uPlane[srcRowOff + srcX];
-                vOut[dstRowOff + x] = decoded.vPlane[srcRowOff + srcX];
+        int srcChromaW = srcW / 2;
+        int srcChromaH = srcH / 2;
+        int drawChromaW = drawW / 2;
+        int drawChromaH = drawH / 2;
+        int cropChromaX = cropX / 2;
+        int cropChromaY = cropY / 2;
+        for (int y = 0; y < drawChromaH; y++) {
+            int srcY = cropChromaY + y * (cropH / 2) / drawChromaH;
+            int srcRowOffset = srcY * srcChromaW;
+            int dstRowOffset = (drawY / 2 + y) * (dstW / 2) + drawX / 2;
+            for (int x = 0; x < drawChromaW; x++) {
+                int srcX = cropChromaX + x * (cropW / 2) / drawChromaW;
+                uOut[dstRowOffset + x] = decoded.uPlane[srcRowOffset + srcX];
+                vOut[dstRowOffset + x] = decoded.vPlane[srcRowOffset + srcX];
             }
         }
 
-        return new CachedYuvFrame(dstW, dstH, yOut, uOut, vOut, nowMs, decoded.timestampNs, false);
+        return new CachedYuvFrame(dstW, dstH, yOut, uOut, vOut,
+                nowMs, decoded.timestampNs, false);
     }
 
     private CachedYuvFrame buildPlaceholderYuvFrame(int width, int height, long nowMs) {
@@ -2012,7 +2071,11 @@ public final class Camera2SessionHook {
      * 截取当前帧（使用渲染器当前旋转），用于 JPEG 拍照替换。
      */
     private Bitmap captureFrameForStill(int targetWidth, int targetHeight) {
-        return captureFrameInternal(targetWidth, targetHeight, -1);
+        int rotationOverride = shouldUseFakeYuvBridgeForPackage(getCurrentPackageName())
+                && !whatsappYuvPumpMap.isEmpty()
+                        ? VideoManager.getConfig().getInt(ConfigManager.KEY_VIDEO_ROTATION_OFFSET, 0)
+                        : -1;
+        return captureFrameInternal(targetWidth, targetHeight, rotationOverride);
     }
 
     /**
@@ -2064,14 +2127,17 @@ public final class Camera2SessionHook {
 
         lastYuvFrameWasFallback = true;
 
-        return captureFrameFromVideoFile(targetWidth, targetHeight);
+        int fallbackRotation = rotationOverride >= 0
+                ? rotationOverride
+                : VideoManager.getConfig().getInt(ConfigManager.KEY_VIDEO_ROTATION_OFFSET, 0);
+        return captureFrameFromVideoFile(targetWidth, targetHeight, fallbackRotation);
     }
 
     /** 缓存的 MediaMetadataRetriever 实例，避免每帧都重新创建和 setDataSource */
     private MediaMetadataRetriever cachedRetriever;
     private String cachedRetrieverPath;
 
-    private Bitmap captureFrameFromVideoFile(int targetWidth, int targetHeight) {
+    private Bitmap captureFrameFromVideoFile(int targetWidth, int targetHeight, int rotationDegrees) {
         // Stream mode: MediaMetadataRetriever cannot work with network URLs.
         // Return null to let caller use GL capture or last-frame cache.
         if (VideoManager.isStreamMode()) {
@@ -2119,6 +2185,7 @@ public final class Camera2SessionHook {
             if (frame == null) {
                 return null;
             }
+            frame = rotateBitmap(frame, rotationDegrees);
             return fitBitmapToTargetAspect(frame, targetWidth, targetHeight);
         } catch (Exception e) {
             LogUtil.log("【CS】视频文件截帧失败: " + e);
@@ -2156,6 +2223,31 @@ public final class Camera2SessionHook {
         float sourceAspect = (float) sourceWidth / (float) sourceHeight;
         float targetAspect = (float) targetWidth / (float) targetHeight;
 
+        String aspectMode = VideoManager.getConfig().getString(
+                ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_FIT);
+        if (!ConfigManager.ASPECT_MODE_CROP.equals(aspectMode)) {
+            float scale = Math.min(targetWidth / (float) sourceWidth, targetHeight / (float) sourceHeight);
+            int scaledWidth = Math.max(1, Math.round(sourceWidth * scale));
+            int scaledHeight = Math.max(1, Math.round(sourceHeight * scale));
+            Bitmap scaled = Bitmap.createScaledBitmap(source, scaledWidth, scaledHeight, true);
+            if (scaledWidth == targetWidth && scaledHeight == targetHeight) {
+                return scaled;
+            }
+            Bitmap letterboxed = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(letterboxed);
+            canvas.drawColor(Color.BLACK);
+            float left = (targetWidth - scaledWidth) / 2.0f;
+            float top = (targetHeight - scaledHeight) / 2.0f;
+            canvas.drawBitmap(scaled, left, top, null);
+            if (scaled != source) {
+                scaled.recycle();
+            }
+            if (!source.isRecycled()) {
+                source.recycle();
+            }
+            return letterboxed;
+        }
+
         Rect cropRect;
         if (Math.abs(sourceAspect - targetAspect) < 0.001f) {
             cropRect = new Rect(0, 0, sourceWidth, sourceHeight);
@@ -2185,6 +2277,24 @@ public final class Camera2SessionHook {
             cropped.recycle();
         }
         return scaled;
+    }
+
+    private Bitmap rotateBitmap(Bitmap source, int rotationDegrees) {
+        if (source == null) {
+            return null;
+        }
+        int normalized = ((rotationDegrees % 360) + 360) % 360;
+        if (normalized == 0) {
+            return source;
+        }
+        Matrix matrix = new Matrix();
+        matrix.postRotate(normalized);
+        Bitmap rotated = Bitmap.createBitmap(source, 0, 0,
+                source.getWidth(), source.getHeight(), matrix, true);
+        if (rotated != source) {
+            source.recycle();
+        }
+        return rotated;
     }
 
     private byte[] compressBitmapToJpeg(Bitmap frame, int maxBytes) {

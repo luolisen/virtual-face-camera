@@ -57,5 +57,9 @@ public interface SurfacePlayerBackend {
 
         /** Playback completed (local file mode only). */
         void onCompletion();
+
+        /** Actual video dimensions reported by the playback engine. */
+        default void onVideoSizeChanged(int width, int height, int rotation) {
+        }
     }
 }

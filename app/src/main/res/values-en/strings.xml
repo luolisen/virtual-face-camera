@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">CamSwap</string>
+    <string name="app_name">Virtual Face Camera</string>
     <string name="module_description">Android virtual camera module</string>
     <string name="click_to_go_to_repo">Go to GitHub Repo</string>
     <string name="description">Visit the online repo for updates, tutorials, and feedback.</string>
@@ -55,7 +55,7 @@
     <string name="settings_notification_control">Enable Notification Control</string>
     <string name="settings_notification_control_desc">Quick switch video in notification</string>
     <string name="settings_overlay_control">Enable Floating Overlay Control</string>
-    <string name="settings_overlay_control_desc">Show a draggable floating bubble for quick switch and rotate actions</string>
+    <string name="settings_overlay_control_desc">Show a draggable bubble with five fixed video shortcuts</string>
     <string name="settings_overlay_permission_desc">Overlay permission is required to show the floating control bubble</string>
     <string name="settings_play_sound">Play Sound</string>
     <string name="settings_play_sound_desc">Play original audio when replacing</string>
@@ -69,6 +69,23 @@
     <string name="mic_mode_video_sync_desc">Play audio track of current video</string>
     <string name="settings_random_play">Random Play</string>
     <string name="settings_random_play_desc">Randomly play from video list</string>
+    <string name="settings_video_display">Video Display</string>
+    <string name="settings_video_aspect">Aspect Mode</string>
+    <string name="settings_video_aspect_desc">Keep the source ratio with fit or crop output</string>
+    <string name="video_aspect_fit">Fit</string>
+    <string name="video_aspect_crop">Crop</string>
+    <string name="settings_overlay_shortcuts">Overlay Shortcut Bindings</string>
+    <string name="shortcut_dot">Dot</string>
+    <string name="shortcut_left">Left</string>
+    <string name="shortcut_right">Right</string>
+    <string name="shortcut_open">Open</string>
+    <string name="shortcut_blink">Blink</string>
+    <string name="shortcut_unbound">Unbound</string>
+    <string name="settings_shortcut_bind_title">Bind "%1$s"</string>
+    <string name="shortcut_unbind">Unbind</string>
+    <string name="shortcut_no_videos">No usable videos in the current media library</string>
+    <string name="overlay_shortcut_unbound">Bind "%1$s" in the app first</string>
+    <string name="overlay_shortcut_select_failed">The video is unavailable or was removed</string>
     <string name="settings_category_advanced">Advanced Settings</string>
     <string name="settings_disable_module">Disable Module</string>
     <string name="settings_disable_module_desc">Temporarily disable all Hook functions</string>
@@ -97,7 +114,7 @@
 
     <!-- About Section -->
     <string name="about_title">About</string>
-    <string name="about_app_name">Android CamSwap</string>
+    <string name="about_app_name">Virtual Face Camera</string>
     <string name="about_version">Version %s</string>
     <string name="about_build_time">Build Time: %s</string>
     <string name="about_desc">Virtual Camera Module based on Xposed Framework</string>

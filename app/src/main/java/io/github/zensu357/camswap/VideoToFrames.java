@@ -15,6 +15,7 @@ import android.view.Surface;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.concurrent.LinkedBlockingQueue;
 
 import io.github.zensu357.camswap.utils.LogUtil;
@@ -467,45 +468,60 @@ public class VideoToFrames implements Runnable {
     private byte[] cropAndScaleNV21(byte[] src, int srcW, int srcH, int dstW, int dstH) {
         float srcAspect = (float) srcW / srcH;
         float dstAspect = (float) dstW / dstH;
+        boolean cropMode = ConfigManager.ASPECT_MODE_CROP.equals(
+                HookMain.getConfig().getString(
+                        ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_FIT));
 
         int cropW = srcW;
         int cropH = srcH;
         int cropX = 0;
         int cropY = 0;
+        int drawW = dstW;
+        int drawH = dstH;
+        int drawX = 0;
+        int drawY = 0;
 
-        if (srcAspect > dstAspect) {
+        if (cropMode && srcAspect > dstAspect) {
             // Source is wider than target -> Crop horizontal
             cropW = (int) (srcH * dstAspect);
             cropW = cropW & ~1; // Ensure even
             cropX = (srcW - cropW) / 2;
             cropX = cropX & ~1; // Ensure even
-        } else if (srcAspect < dstAspect) {
+        } else if (cropMode && srcAspect < dstAspect) {
             // Source is taller than target -> Crop vertical
             cropH = (int) (srcW / dstAspect);
             cropH = cropH & ~1; // Ensure even
             cropY = (srcH - cropH) / 2;
             cropY = cropY & ~1; // Ensure even
+        } else if (!cropMode) {
+            float scale = Math.min(dstW / (float) srcW, dstH / (float) srcH);
+            drawW = Math.max(2, Math.min(dstW, ((int) (srcW * scale)) & ~1));
+            drawH = Math.max(2, Math.min(dstH, ((int) (srcH * scale)) & ~1));
+            drawX = ((dstW - drawW) / 2) & ~1;
+            drawY = ((dstH - drawH) / 2) & ~1;
         }
 
         byte[] dst = new byte[dstW * dstH * 3 / 2];
+        Arrays.fill(dst, 0, dstW * dstH, (byte) 16);
+        Arrays.fill(dst, dstW * dstH, dst.length, (byte) 128);
 
-        int scaleX_fp = (cropW << 16) / dstW;
-        int scaleY_fp = (cropH << 16) / dstH;
+        int scaleX_fp = (cropW << 16) / drawW;
+        int scaleY_fp = (cropH << 16) / drawH;
 
         // Scale Y using Bilinear Interpolation
-        for (int y = 0; y < dstH; y++) {
-            float sy = cropY + y * (float) cropH / dstH;
+        for (int y = 0; y < drawH; y++) {
+            float sy = cropY + y * (float) cropH / drawH;
             int y0 = (int) sy;
             int y1 = Math.min(y0 + 1, cropY + cropH - 1);
             float dy = sy - y0;
             float dy1 = 1.0f - dy;
 
-            int dstRowOffset = y * dstW;
+            int dstRowOffset = (drawY + y) * dstW + drawX;
             int srcRowOffset0 = y0 * srcW;
             int srcRowOffset1 = y1 * srcW;
 
-            for (int x = 0; x < dstW; x++) {
-                float sx = cropX + x * (float) cropW / dstW;
+            for (int x = 0; x < drawW; x++) {
+                float sx = cropX + x * (float) cropW / drawW;
                 int x0 = (int) sx;
                 int x1 = Math.min(x0 + 1, cropX + cropW - 1);
                 float dx = sx - x0;
@@ -524,11 +540,11 @@ public class VideoToFrames implements Runnable {
         // Scale UV using Nearest Neighbor (sufficient for chroma and faster)
         int srcUVStart = srcW * srcH;
         int dstUVStart = dstW * dstH;
-        for (int y = 0; y < dstH / 2; y++) {
+        for (int y = 0; y < drawH / 2; y++) {
             int sy = (cropY / 2) + ((y * scaleY_fp) >> 16);
             int srcRowOffset = srcUVStart + sy * srcW;
-            int dstRowOffset = dstUVStart + y * dstW;
-            for (int x = 0; x < dstW / 2; x++) {
+            int dstRowOffset = dstUVStart + (drawY / 2 + y) * dstW + drawX;
+            for (int x = 0; x < drawW / 2; x++) {
                 int sx = (cropX / 2) + ((x * scaleX_fp) >> 16);
                 int srcColOffset = sx * 2;
                 dst[dstRowOffset + x * 2] = src[srcRowOffset + srcColOffset];
@@ -553,9 +569,21 @@ public class VideoToFrames implements Runnable {
         if (bitmap != null) {
             android.graphics.Canvas canvas = surface.lockCanvas(null);
             if (canvas != null) {
-                // 缩放 bitmap 以填充 canvas
-                android.graphics.Rect destRect = new android.graphics.Rect(0, 0, canvas.getWidth(), canvas.getHeight());
-                canvas.drawBitmap(bitmap, null, destRect, null);
+                int targetWidth = canvas.getWidth();
+                int targetHeight = canvas.getHeight();
+                boolean crop = ConfigManager.ASPECT_MODE_CROP.equals(
+                        HookMain.getConfig().getString(
+                                ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_FIT));
+                float scale = crop
+                        ? Math.max(targetWidth / (float) bitmap.getWidth(), targetHeight / (float) bitmap.getHeight())
+                        : Math.min(targetWidth / (float) bitmap.getWidth(), targetHeight / (float) bitmap.getHeight());
+                float drawWidth = bitmap.getWidth() * scale;
+                float drawHeight = bitmap.getHeight() * scale;
+                float left = (targetWidth - drawWidth) / 2.0f;
+                float top = (targetHeight - drawHeight) / 2.0f;
+                canvas.drawColor(android.graphics.Color.BLACK);
+                canvas.drawBitmap(bitmap, null,
+                        new android.graphics.RectF(left, top, left + drawWidth, top + drawHeight), null);
                 surface.unlockCanvasAndPost(canvas);
             }
             bitmap.recycle();

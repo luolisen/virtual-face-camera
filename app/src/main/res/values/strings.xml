@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">CamSwap</string>
+    <string name="app_name">Virtual Face Camera</string>
     <string name="module_description">安卓虚拟摄像头</string>
     <string name="click_to_go_to_repo">前往 GitHub 仓库</string>
     <string name="description">请访问在线仓库查看最新更新、使用教程及反馈问题</string>
@@ -55,7 +55,7 @@
     <string name="settings_notification_control">启用通知栏控制</string>
     <string name="settings_notification_control_desc">在通知栏快速切换视频</string>
     <string name="settings_overlay_control">启用悬浮窗控制</string>
-    <string name="settings_overlay_control_desc">显示可拖动悬浮球，展开后可快速切换视频和旋转</string>
+    <string name="settings_overlay_control_desc">显示可拖动悬浮球，展开后使用五个固定快捷键切换视频</string>
     <string name="settings_overlay_permission_desc">需要授予悬浮窗权限才能显示控制球</string>
     <string name="settings_play_sound">播放声音</string>
     <string name="settings_play_sound_desc">替换视频时播放原声音频</string>
@@ -69,6 +69,23 @@
     <string name="mic_mode_video_sync_desc">播放当前替换视频的原声音轨</string>
     <string name="settings_random_play">随机播放</string>
     <string name="settings_random_play_desc">从视频列表中随机选择视频播放</string>
+    <string name="settings_video_display">视频显示</string>
+    <string name="settings_video_aspect">画面适配</string>
+    <string name="settings_video_aspect_desc">保持视频比例，选择完整显示或填满裁切</string>
+    <string name="video_aspect_fit">完整显示</string>
+    <string name="video_aspect_crop">填满裁切</string>
+    <string name="settings_overlay_shortcuts">悬浮窗快捷键绑定</string>
+    <string name="shortcut_dot">点</string>
+    <string name="shortcut_left">左</string>
+    <string name="shortcut_right">右</string>
+    <string name="shortcut_open">张</string>
+    <string name="shortcut_blink">眨</string>
+    <string name="shortcut_unbound">未绑定</string>
+    <string name="settings_shortcut_bind_title">绑定「%1$s」</string>
+    <string name="shortcut_unbind">解除绑定</string>
+    <string name="shortcut_no_videos">当前媒体库没有可用视频</string>
+    <string name="overlay_shortcut_unbound">请先在 App 中绑定「%1$s」</string>
+    <string name="overlay_shortcut_select_failed">视频不可用或已被移除</string>
     <string name="settings_category_advanced">高级设置</string>
     <string name="settings_disable_module">禁用模块</string>
     <string name="settings_disable_module_desc">暂时禁用所有Hook功能</string>
@@ -102,7 +119,7 @@
 
     <!-- About Section -->
     <string name="about_title">关于</string>
-    <string name="about_app_name">Android CamSwap</string>
+    <string name="about_app_name">Virtual Face Camera</string>
     <string name="about_version">版本 %s</string>
     <string name="about_build_time">构建时间: %s</string>
     <string name="about_desc">基于 Xposed 框架的虚拟摄像头模块</string>

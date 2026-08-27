@@ -95,6 +95,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
     }
 
     var showRootModeWarningDialog by remember { mutableStateOf(false) }
+    var shortcutDialogKey by remember { mutableStateOf<String?>(null) }
 
     val onRootModeConfirm = {
         viewModel.switchInjectionMode(
@@ -303,6 +304,92 @@ fun SettingsScreen(viewModel: MainViewModel) {
                     checked = uiState.enableRandomPlay,
                     onCheckedChange = { viewModel.setEnableRandomPlay(it) }
             )
+        }
+
+        // ==================== Video Display / Overlay Shortcuts ====================
+        SettingsSection(title = stringResource(R.string.settings_video_display)) {
+            Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                        imageVector = Icons.Default.Videocam,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        modifier = Modifier.size(22.dp)
+                )
+                Spacer(modifier = Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                            text = stringResource(R.string.settings_video_aspect),
+                            style = MaterialTheme.typography.bodyLarge
+                    )
+                    Text(
+                            text = stringResource(R.string.settings_video_aspect_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 36.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                        selected = uiState.videoAspectMode != ConfigManager.ASPECT_MODE_CROP,
+                        onClick = { viewModel.setVideoAspectMode(ConfigManager.ASPECT_MODE_FIT) },
+                        label = { Text(stringResource(R.string.video_aspect_fit)) }
+                )
+                FilterChip(
+                        selected = uiState.videoAspectMode == ConfigManager.ASPECT_MODE_CROP,
+                        onClick = { viewModel.setVideoAspectMode(ConfigManager.ASPECT_MODE_CROP) },
+                        label = { Text(stringResource(R.string.video_aspect_crop)) }
+                )
+            }
+
+            SettingsDivider()
+
+            Text(
+                    text = stringResource(R.string.settings_overlay_shortcuts),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(vertical = 4.dp)
+            )
+            val shortcutBindings = listOf(
+                    ShortcutBindingSpec(
+                            ConfigManager.KEY_SHORTCUT_DOT_VIDEO,
+                            R.string.shortcut_dot,
+                            uiState.shortcutDotVideo
+                    ),
+                    ShortcutBindingSpec(
+                            ConfigManager.KEY_SHORTCUT_LEFT_VIDEO,
+                            R.string.shortcut_left,
+                            uiState.shortcutLeftVideo
+                    ),
+                    ShortcutBindingSpec(
+                            ConfigManager.KEY_SHORTCUT_RIGHT_VIDEO,
+                            R.string.shortcut_right,
+                            uiState.shortcutRightVideo
+                    ),
+                    ShortcutBindingSpec(
+                            ConfigManager.KEY_SHORTCUT_OPEN_VIDEO,
+                            R.string.shortcut_open,
+                            uiState.shortcutOpenVideo
+                    ),
+                    ShortcutBindingSpec(
+                            ConfigManager.KEY_SHORTCUT_BLINK_VIDEO,
+                            R.string.shortcut_blink,
+                            uiState.shortcutBlinkVideo
+                    )
+            )
+            shortcutBindings.forEach { binding ->
+                SettingsClickRow(
+                        icon = Icons.Default.Videocam,
+                        title = stringResource(binding.labelRes),
+                        subtitle = binding.videoName ?: stringResource(R.string.shortcut_unbound),
+                        onClick = { shortcutDialogKey = binding.key }
+                )
+            }
         }
 
         // ==================== Stream Settings ====================
@@ -666,6 +753,84 @@ fun SettingsScreen(viewModel: MainViewModel) {
 
         Spacer(modifier = Modifier.height(24.dp))
     }
+
+    val selectedShortcut = when (shortcutDialogKey) {
+        ConfigManager.KEY_SHORTCUT_DOT_VIDEO -> ShortcutBindingSpec(
+                ConfigManager.KEY_SHORTCUT_DOT_VIDEO, R.string.shortcut_dot, uiState.shortcutDotVideo)
+        ConfigManager.KEY_SHORTCUT_LEFT_VIDEO -> ShortcutBindingSpec(
+                ConfigManager.KEY_SHORTCUT_LEFT_VIDEO, R.string.shortcut_left, uiState.shortcutLeftVideo)
+        ConfigManager.KEY_SHORTCUT_RIGHT_VIDEO -> ShortcutBindingSpec(
+                ConfigManager.KEY_SHORTCUT_RIGHT_VIDEO, R.string.shortcut_right, uiState.shortcutRightVideo)
+        ConfigManager.KEY_SHORTCUT_OPEN_VIDEO -> ShortcutBindingSpec(
+                ConfigManager.KEY_SHORTCUT_OPEN_VIDEO, R.string.shortcut_open, uiState.shortcutOpenVideo)
+        ConfigManager.KEY_SHORTCUT_BLINK_VIDEO -> ShortcutBindingSpec(
+                ConfigManager.KEY_SHORTCUT_BLINK_VIDEO, R.string.shortcut_blink, uiState.shortcutBlinkVideo)
+        else -> null
+    }
+
+    if (selectedShortcut != null) {
+        val availableVideos = viewModel.listAvailableVideoNames()
+        AlertDialog(
+                onDismissRequest = { shortcutDialogKey = null },
+                title = {
+                    Text(
+                            stringResource(
+                                    R.string.settings_shortcut_bind_title,
+                                    stringResource(selectedShortcut.labelRes)
+                            )
+                    )
+                },
+                text = {
+                    if (availableVideos.isEmpty()) {
+                        Text(stringResource(R.string.shortcut_no_videos))
+                    } else {
+                        Column(
+                                modifier = Modifier
+                                        .heightIn(max = 360.dp)
+                                        .verticalScroll(rememberScrollState())
+                        ) {
+                            availableVideos.forEach { videoName ->
+                                Row(
+                                        modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    viewModel.setShortcutVideo(selectedShortcut.key, videoName)
+                                                    shortcutDialogKey = null
+                                                }
+                                                .padding(vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    RadioButton(
+                                            selected = selectedShortcut.videoName == videoName,
+                                            onClick = {
+                                                viewModel.setShortcutVideo(selectedShortcut.key, videoName)
+                                                shortcutDialogKey = null
+                                            }
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(videoName, maxLines = 1)
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { shortcutDialogKey = null }) {
+                        Text(stringResource(R.string.positive))
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                            onClick = {
+                                viewModel.setShortcutVideo(selectedShortcut.key, null)
+                                shortcutDialogKey = null
+                            }
+                    ) {
+                        Text(stringResource(R.string.shortcut_unbind))
+                    }
+                }
+        )
+    }
 }
 
 // ==================== Reusable Components ====================
@@ -728,6 +893,12 @@ private fun ModeButton(
         }
     }
 }
+
+private data class ShortcutBindingSpec(
+        val key: String,
+        val labelRes: Int,
+        val videoName: String?
+)
 
 @Composable
 private fun SettingsSection(title: String, content: @Composable ColumnScope.() -> Unit) {

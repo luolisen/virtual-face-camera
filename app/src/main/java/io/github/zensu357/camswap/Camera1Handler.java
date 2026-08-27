@@ -213,8 +213,9 @@ public class Camera1Handler implements ICameraHandler {
         HookMain.playerManager.c1_renderer_holder = renderer;
         if (renderer != null && renderer.isInitialized()) {
             HookMain.playerManager.mplayer1.setSurface(renderer.getInputSurface());
-            int rotation = VideoManager.getConfig().getInt(ConfigManager.KEY_VIDEO_ROTATION_OFFSET, 0);
-            renderer.setRotation(rotation);
+            HookMain.playerManager.configureRenderer(renderer, null);
+            HookMain.playerManager.mplayer1.setOnVideoSizeChangedListener(
+                    (mp, width, height) -> renderer.setSourceSize(width, height));
         } else {
             HookMain.playerManager.mplayer1.setSurface(HookMain.ori_holder.getSurface());
         }
@@ -267,8 +268,9 @@ public class Camera1Handler implements ICameraHandler {
         HookMain.playerManager.c1_renderer_texture = renderer;
         if (renderer != null && renderer.isInitialized()) {
             HookMain.playerManager.mMediaPlayer.setSurface(renderer.getInputSurface());
-            int rotation = VideoManager.getConfig().getInt(ConfigManager.KEY_VIDEO_ROTATION_OFFSET, 0);
-            renderer.setRotation(rotation);
+            HookMain.playerManager.configureRenderer(renderer, null);
+            HookMain.playerManager.mMediaPlayer.setOnVideoSizeChangedListener(
+                    (mp, width, height) -> renderer.setSourceSize(width, height));
         } else {
             HookMain.playerManager.mMediaPlayer.setSurface(HookMain.mSurface);
         }
@@ -415,12 +417,8 @@ public class Camera1Handler implements ICameraHandler {
             retriever.release();
 
             if (frame != null) {
-                if (frame.getWidth() != HookMain.mwidth || frame.getHeight() != HookMain.mhight) {
-                    android.graphics.Bitmap scaled = android.graphics.Bitmap.createScaledBitmap(
-                            frame, HookMain.mwidth, HookMain.mhight, true);
-                    frame.recycle();
-                    frame = scaled;
-                }
+                int rotation = VideoManager.getConfig().getInt(ConfigManager.KEY_VIDEO_ROTATION_OFFSET, 0);
+                frame = preparePhotoBitmap(frame, HookMain.mwidth, HookMain.mhight, rotation);
                 java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
                 frame.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, bos);
                 byte[] jpegData = bos.toByteArray();
@@ -433,6 +431,83 @@ public class Camera1Handler implements ICameraHandler {
             LogUtil.log("【CS】Camera1 从视频截帧失败: " + e);
         }
         return null;
+    }
+
+    private android.graphics.Bitmap preparePhotoBitmap(android.graphics.Bitmap source,
+            int targetWidth, int targetHeight, int rotationDegrees) {
+        if (source == null || targetWidth <= 0 || targetHeight <= 0) {
+            return source;
+        }
+        int normalizedRotation = ((rotationDegrees % 360) + 360) % 360;
+        if (normalizedRotation != 0) {
+            android.graphics.Matrix rotationMatrix = new android.graphics.Matrix();
+            rotationMatrix.postRotate(normalizedRotation);
+            android.graphics.Bitmap rotated = android.graphics.Bitmap.createBitmap(
+                    source, 0, 0, source.getWidth(), source.getHeight(), rotationMatrix, true);
+            if (rotated != source) {
+                source.recycle();
+                source = rotated;
+            }
+        }
+
+        float scale = ConfigManager.ASPECT_MODE_CROP.equals(
+                VideoManager.getConfig().getString(
+                        ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_FIT))
+                                ? Math.max(targetWidth / (float) source.getWidth(),
+                                        targetHeight / (float) source.getHeight())
+                                : Math.min(targetWidth / (float) source.getWidth(),
+                                        targetHeight / (float) source.getHeight());
+        int scaledWidth = Math.max(1, Math.round(source.getWidth() * scale));
+        int scaledHeight = Math.max(1, Math.round(source.getHeight() * scale));
+        android.graphics.Bitmap scaled = android.graphics.Bitmap.createScaledBitmap(
+                source, scaledWidth, scaledHeight, true);
+
+        if (ConfigManager.ASPECT_MODE_CROP.equals(
+                VideoManager.getConfig().getString(
+                        ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_FIT))) {
+            int left = Math.max(0, (scaledWidth - targetWidth) / 2);
+            int top = Math.max(0, (scaledHeight - targetHeight) / 2);
+            android.graphics.Bitmap cropped = android.graphics.Bitmap.createBitmap(
+                    scaled, left, top, Math.min(targetWidth, scaledWidth - left),
+                    Math.min(targetHeight, scaledHeight - top));
+            if (cropped != scaled) {
+                scaled.recycle();
+            }
+            if (cropped.getWidth() != targetWidth || cropped.getHeight() != targetHeight) {
+                android.graphics.Bitmap output = android.graphics.Bitmap.createScaledBitmap(
+                        cropped, targetWidth, targetHeight, true);
+                if (output != cropped) {
+                    cropped.recycle();
+                }
+                cropped = output;
+            }
+            if (scaled != source && !source.isRecycled()) {
+                source.recycle();
+            }
+            return cropped;
+        }
+
+        if (scaledWidth == targetWidth && scaledHeight == targetHeight) {
+            if (scaled != source && !source.isRecycled()) {
+                source.recycle();
+            }
+            return scaled;
+        }
+        android.graphics.Bitmap letterboxed = android.graphics.Bitmap.createBitmap(
+                targetWidth, targetHeight, android.graphics.Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas canvas = new android.graphics.Canvas(letterboxed);
+        canvas.drawColor(android.graphics.Color.BLACK);
+        canvas.drawBitmap(scaled,
+                (targetWidth - scaledWidth) / 2.0f,
+                (targetHeight - scaledHeight) / 2.0f,
+                null);
+        if (scaled != source) {
+            scaled.recycle();
+        }
+        if (!source.isRecycled()) {
+            source.recycle();
+        }
+        return letterboxed;
     }
 
     private byte[] buildBlackFallbackJpeg() {

@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import android.widget.Toast
 import io.github.zensu357.camswap.ConfigManager
 import io.github.zensu357.camswap.R
+import io.github.zensu357.camswap.utils.VideoManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,6 +18,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.io.File
 
 data class MainUiState(
     val isModuleDisabled: Boolean = false,
@@ -27,6 +29,12 @@ data class MainUiState(
     val enableMicHook: Boolean = false,
     val micHookMode: String = "mute",
     val enablePhotoFake: Boolean = false,
+    val videoAspectMode: String = ConfigManager.ASPECT_MODE_FIT,
+    val shortcutDotVideo: String? = null,
+    val shortcutLeftVideo: String? = null,
+    val shortcutRightVideo: String? = null,
+    val shortcutOpenVideo: String? = null,
+    val shortcutBlinkVideo: String? = null,
 
     val notificationControlEnabled: Boolean = false,
     val overlayControlEnabled: Boolean = false,
@@ -49,12 +57,15 @@ data class MainUiState(
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
-    private val configManager = ConfigManager()
+    private val configManager = ConfigManager(false)
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
     private var hasAutoInjectedStartup = false
 
     init {
+        // Keep App-side writes on the same Provider-backed path as the overlay
+        // and target-process readers so changes are delivered immediately.
+        configManager.setContext(application.applicationContext)
         loadConfig()
         checkLatestVersion()
     }
@@ -74,6 +85,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     enableMicHook = configManager.getBoolean(ConfigManager.KEY_ENABLE_MIC_HOOK, false),
                     micHookMode = configManager.getString(ConfigManager.KEY_MIC_HOOK_MODE, ConfigManager.MIC_MODE_MUTE),
                     enablePhotoFake = configManager.getBoolean(ConfigManager.KEY_ENABLE_PHOTO_FAKE, false),
+                    videoAspectMode = configManager.getString(
+                        ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_FIT),
+                    shortcutDotVideo = configManager.getShortcutVideo(ConfigManager.KEY_SHORTCUT_DOT_VIDEO)
+                        .ifEmpty { null },
+                    shortcutLeftVideo = configManager.getShortcutVideo(ConfigManager.KEY_SHORTCUT_LEFT_VIDEO)
+                        .ifEmpty { null },
+                    shortcutRightVideo = configManager.getShortcutVideo(ConfigManager.KEY_SHORTCUT_RIGHT_VIDEO)
+                        .ifEmpty { null },
+                    shortcutOpenVideo = configManager.getShortcutVideo(ConfigManager.KEY_SHORTCUT_OPEN_VIDEO)
+                        .ifEmpty { null },
+                    shortcutBlinkVideo = configManager.getShortcutVideo(ConfigManager.KEY_SHORTCUT_BLINK_VIDEO)
+                        .ifEmpty { null },
                     notificationControlEnabled = configManager.getBoolean(ConfigManager.KEY_NOTIFICATION_CONTROL_ENABLED, false),
                     overlayControlEnabled = configManager.getBoolean(ConfigManager.KEY_OVERLAY_CONTROL_ENABLED, false),
                     targetAppsCount = configManager.targetPackages.size,
@@ -171,6 +194,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             configManager.setBoolean(ConfigManager.KEY_OVERLAY_CONTROL_ENABLED, enabled)
             _uiState.update { it.copy(overlayControlEnabled = enabled) }
         }
+    }
+
+    fun setVideoAspectMode(mode: String) {
+        val normalized = if (mode == ConfigManager.ASPECT_MODE_CROP) {
+            ConfigManager.ASPECT_MODE_CROP
+        } else {
+            ConfigManager.ASPECT_MODE_FIT
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            configManager.setString(ConfigManager.KEY_VIDEO_ASPECT_MODE, normalized)
+            _uiState.update { it.copy(videoAspectMode = normalized) }
+        }
+    }
+
+    fun setShortcutVideo(key: String, videoName: String?) {
+        if (!ConfigManager.isShortcutVideoKey(key)) {
+            return
+        }
+        val normalized = videoName?.takeIf { it.isNotEmpty() }
+        viewModelScope.launch(Dispatchers.IO) {
+            configManager.setShortcutVideo(key, normalized)
+            _uiState.update { state ->
+                when (key) {
+                    ConfigManager.KEY_SHORTCUT_DOT_VIDEO -> state.copy(shortcutDotVideo = normalized)
+                    ConfigManager.KEY_SHORTCUT_LEFT_VIDEO -> state.copy(shortcutLeftVideo = normalized)
+                    ConfigManager.KEY_SHORTCUT_RIGHT_VIDEO -> state.copy(shortcutRightVideo = normalized)
+                    ConfigManager.KEY_SHORTCUT_OPEN_VIDEO -> state.copy(shortcutOpenVideo = normalized)
+                    ConfigManager.KEY_SHORTCUT_BLINK_VIDEO -> state.copy(shortcutBlinkVideo = normalized)
+                    else -> state
+                }
+            }
+        }
+    }
+
+    fun listAvailableVideoNames(): List<String> {
+        val files = VideoManager.listVideoFiles(File(ConfigManager.DEFAULT_CONFIG_DIR))
+        return files?.map { it.name } ?: emptyList()
     }
 
     // ---- Stream config setters ----

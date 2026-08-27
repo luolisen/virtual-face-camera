@@ -21,7 +21,7 @@ public final class ConfigWatcher {
     public interface Callback {
         void onMediaSourceChanged();
 
-        void onRotationChanged(int degrees);
+        void onRenderingConfigChanged(int degrees, String aspectMode);
     }
 
     private final Callback callback;
@@ -46,9 +46,10 @@ public final class ConfigWatcher {
             public void onChange(boolean selfChange) {
                 super.onChange(selfChange);
                 LogUtil.log("【CS】Provider 配置变更");
-                VideoManager.getConfig().forceReload();
-                VideoManager.updateVideoPath(false);
-                callback.onMediaSourceChanged();
+                ConfigManager config = VideoManager.getConfig();
+                ConfigState oldState = ConfigState.capture(config);
+                config.forceReload();
+                dispatchChanges(config, oldState);
             }
         };
 
@@ -72,9 +73,10 @@ public final class ConfigWatcher {
                         if (path != null && path.endsWith(".json")) {
                             LogUtil.log("【CS】文件变更: " + path);
                             new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                                VideoManager.getConfig().forceReload();
-                                VideoManager.updateVideoPath(false);
-                                callback.onMediaSourceChanged();
+                                ConfigManager config = VideoManager.getConfig();
+                                ConfigState oldState = ConfigState.capture(config);
+                                config.forceReload();
+                                dispatchChanges(config, oldState);
                             }, 200);
                         }
                     }
@@ -124,49 +126,77 @@ public final class ConfigWatcher {
         if (configJson == null)
             return;
 
-        // Snapshot old values
-        String oldVideo = config.getString(ConfigManager.KEY_SELECTED_VIDEO, "");
-        String oldImage = config.getString(ConfigManager.KEY_SELECTED_IMAGE, "");
-        String oldMode = config.getString(ConfigManager.KEY_REPLACE_MODE, ConfigManager.REPLACE_MODE_VIDEO);
-        boolean oldFpd = config.getBoolean(ConfigManager.KEY_FORCE_PRIVATE_DIR, false);
-        int oldRotation = config.getInt(ConfigManager.KEY_VIDEO_ROTATION_OFFSET, 0);
-        // Stream config snapshots
-        String oldSourceType = config.getString(ConfigManager.KEY_MEDIA_SOURCE_TYPE, ConfigManager.MEDIA_SOURCE_LOCAL);
-        String oldStreamUrl = config.getString(ConfigManager.KEY_STREAM_URL, "");
+        ConfigState oldState = ConfigState.capture(config);
 
         config.updateConfigFromJSON(configJson);
-
-        // Snapshot new values
-        String newVideo = config.getString(ConfigManager.KEY_SELECTED_VIDEO, "");
-        String newImage = config.getString(ConfigManager.KEY_SELECTED_IMAGE, "");
-        String newMode = config.getString(ConfigManager.KEY_REPLACE_MODE, ConfigManager.REPLACE_MODE_VIDEO);
-        boolean newFpd = config.getBoolean(ConfigManager.KEY_FORCE_PRIVATE_DIR, false);
-        int newRotation = config.getInt(ConfigManager.KEY_VIDEO_ROTATION_OFFSET, 0);
-        // Stream config new values
-        String newSourceType = config.getString(ConfigManager.KEY_MEDIA_SOURCE_TYPE, ConfigManager.MEDIA_SOURCE_LOCAL);
-        String newStreamUrl = config.getString(ConfigManager.KEY_STREAM_URL, "");
 
         // Always extract video from Binder if attached
         if (intent.hasExtra(IpcContract.EXTRA_VIDEO_BUNDLE)) {
             extractVideoFromBinder(intent);
         }
 
-        boolean mediaChanged = !oldVideo.equals(newVideo) ||
-                !oldImage.equals(newImage) ||
-                !oldMode.equals(newMode) ||
-                (oldFpd != newFpd) ||
-                !oldSourceType.equals(newSourceType) ||
-                !oldStreamUrl.equals(newStreamUrl);
+        dispatchChanges(config, oldState);
+    }
+
+    private void dispatchChanges(ConfigManager config, ConfigState oldState) {
+        ConfigState newState = ConfigState.capture(config);
+        boolean mediaChanged = !oldState.selectedVideo.equals(newState.selectedVideo)
+                || !oldState.selectedImage.equals(newState.selectedImage)
+                || !oldState.replaceMode.equals(newState.replaceMode)
+                || oldState.forcePrivateDir != newState.forcePrivateDir
+                || !oldState.sourceType.equals(newState.sourceType)
+                || !oldState.streamUrl.equals(newState.streamUrl);
+        boolean renderingChanged = oldState.rotation != newState.rotation
+                || !oldState.aspectMode.equals(newState.aspectMode);
 
         if (mediaChanged) {
             VideoManager.updateVideoPath(false);
             callback.onMediaSourceChanged();
             LogUtil.log("【CS】配置更新: 媒体源变化，重启播放器");
-        } else if (oldRotation != newRotation) {
-            LogUtil.log("【CS】配置更新: 旋转 " + newRotation + "°");
-            callback.onRotationChanged(newRotation);
-        } else {
+        }
+        if (renderingChanged) {
+            LogUtil.log("【CS】配置更新: 渲染配置 旋转=" + newState.rotation
+                    + "° 适配=" + newState.aspectMode);
+            callback.onRenderingConfigChanged(newState.rotation, newState.aspectMode);
+        }
+        if (!mediaChanged && !renderingChanged) {
             LogUtil.log("【CS】配置更新: 无变化");
+        }
+    }
+
+    private static final class ConfigState {
+        final String selectedVideo;
+        final String selectedImage;
+        final String replaceMode;
+        final boolean forcePrivateDir;
+        final String sourceType;
+        final String streamUrl;
+        final int rotation;
+        final String aspectMode;
+
+        private ConfigState(String selectedVideo, String selectedImage, String replaceMode,
+                boolean forcePrivateDir, String sourceType, String streamUrl,
+                int rotation, String aspectMode) {
+            this.selectedVideo = selectedVideo;
+            this.selectedImage = selectedImage;
+            this.replaceMode = replaceMode;
+            this.forcePrivateDir = forcePrivateDir;
+            this.sourceType = sourceType;
+            this.streamUrl = streamUrl;
+            this.rotation = rotation;
+            this.aspectMode = aspectMode;
+        }
+
+        static ConfigState capture(ConfigManager config) {
+            return new ConfigState(
+                    config.getString(ConfigManager.KEY_SELECTED_VIDEO, ""),
+                    config.getString(ConfigManager.KEY_SELECTED_IMAGE, ""),
+                    config.getString(ConfigManager.KEY_REPLACE_MODE, ConfigManager.REPLACE_MODE_VIDEO),
+                    config.getBoolean(ConfigManager.KEY_FORCE_PRIVATE_DIR, false),
+                    config.getString(ConfigManager.KEY_MEDIA_SOURCE_TYPE, ConfigManager.MEDIA_SOURCE_LOCAL),
+                    config.getString(ConfigManager.KEY_STREAM_URL, ""),
+                    config.getInt(ConfigManager.KEY_VIDEO_ROTATION_OFFSET, 0),
+                    config.getString(ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_FIT));
         }
     }
 

@@ -55,6 +55,9 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
 
     // State
     private volatile int mRotationDegrees = 0;
+    private volatile int mSourceWidth = 0;
+    private volatile int mSourceHeight = 0;
+    private volatile String mAspectMode = ConfigManager.ASPECT_MODE_FIT;
     private volatile boolean mReleased = false;
     private boolean mInitialized = false;
 
@@ -116,6 +119,19 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
         mRotationDegrees = ((degrees % 360) + 360) % 360;
     }
 
+    public void setSourceSize(int width, int height) {
+        if (width > 0 && height > 0) {
+            mSourceWidth = width;
+            mSourceHeight = height;
+        }
+    }
+
+    public void setAspectMode(String aspectMode) {
+        mAspectMode = ConfigManager.ASPECT_MODE_CROP.equals(aspectMode)
+                ? ConfigManager.ASPECT_MODE_CROP
+                : ConfigManager.ASPECT_MODE_FIT;
+    }
+
     @Override
     public void onFrameAvailable(SurfaceTexture surfaceTexture) {
         if (mReleased || !mInitialized)
@@ -155,10 +171,26 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
                 }
             }
 
-            if (mRotationDegrees == 0) {
-                Matrix.setIdentityM(mRotMatrix, 0);
-            } else {
-                Matrix.setRotateM(mRotMatrix, 0, -mRotationDegrees, 0, 0, 1.0f);
+            EGLSurface activeSurface = mEGLWindowSurface != EGL14.EGL_NO_SURFACE
+                    ? mEGLWindowSurface : mEGLPbufferSurface;
+            int[] surfaceWidth = new int[1];
+            int[] surfaceHeight = new int[1];
+            EGL14.eglQuerySurface(mEGLDisplay, activeSurface, EGL14.EGL_WIDTH, surfaceWidth, 0);
+            EGL14.eglQuerySurface(mEGLDisplay, activeSurface, EGL14.EGL_HEIGHT, surfaceHeight, 0);
+            if (surfaceWidth[0] > 0 && surfaceHeight[0] > 0) {
+                GLES20.glViewport(0, 0, surfaceWidth[0], surfaceHeight[0]);
+            }
+
+            Matrix.setIdentityM(mRotMatrix, 0);
+            if (surfaceWidth[0] > 0 && surfaceHeight[0] > 0
+                    && mSourceWidth > 0 && mSourceHeight > 0) {
+                VideoAspectLayout.Layout layout = VideoAspectLayout.calculate(
+                        mSourceWidth, mSourceHeight, surfaceWidth[0], surfaceHeight[0],
+                        mRotationDegrees, mAspectMode);
+                Matrix.scaleM(mRotMatrix, 0, layout.scaleX, layout.scaleY, 1.0f);
+            }
+            if (mRotationDegrees != 0) {
+                Matrix.rotateM(mRotMatrix, 0, -mRotationDegrees, 0, 0, 1.0f);
             }
 
             GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);

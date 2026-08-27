@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">CamSwap</string>
+    <string name="app_name">Virtual Face Camera</string>
     <string name="module_description">安卓虚拟摄像头</string>
     <string name="click_to_go_to_repo">前往仓库</string>
     <string name="description">请前往在线仓库来查看使用方法，应用更新和反馈缺陷</string>

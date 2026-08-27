@@ -34,6 +34,23 @@ public final class ControlActionHelper {
         return rotation;
     }
 
+    /** Select one exact video through the provider IPC contract. */
+    public static boolean selectVideo(Context context, String videoName) {
+        if (context == null || videoName == null || videoName.isEmpty()) {
+            return false;
+        }
+        try {
+            Bundle extras = new Bundle();
+            extras.putString(IpcContract.EXTRA_VIDEO_NAME, videoName);
+            Bundle result = context.getContentResolver().call(
+                    IpcContract.CONTENT_URI, IpcContract.METHOD_SELECT, null, extras);
+            return result != null && result.getBoolean(IpcContract.EXTRA_CHANGED, false);
+        } catch (Throwable t) {
+            LogUtil.log("【CS】ControlActionHelper provider select failed: " + t);
+            return false;
+        }
+    }
+
     public static void setOverlayEnabled(Context context, boolean enabled) {
         ConfigManager configManager = new ConfigManager();
         configManager.setContext(context);

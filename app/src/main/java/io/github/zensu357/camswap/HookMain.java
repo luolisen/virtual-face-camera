@@ -136,17 +136,20 @@ public class HookMain {
                         return;
                     }
                     playerManager.restartAll();
+                    camera2Hook.applyYuvPreviewRenderingConfig();
                     camera2Hook.restartYuvDecoderForSourceChange();
                 }
 
                 @Override
-                public void onRotationChanged(int degrees) {
+                public void onRenderingConfigChanged(int degrees, String aspectMode) {
                     String mode = VideoManager.getConfig().getString(ConfigManager.KEY_INJECTION_MODE, ConfigManager.INJECTION_MODE_LSPOSED);
                     if (ConfigManager.INJECTION_MODE_CAMSERVER.equals(mode)) {
                         playerManager.releaseAllRenderers();
                         return;
                     }
                     playerManager.updateRotation(degrees);
+                    playerManager.updateAspectMode(aspectMode);
+                    camera2Hook.applyYuvPreviewRenderingConfig();
                     camera2Hook.restartYuvDecoderForSourceChange();
                 }
             });

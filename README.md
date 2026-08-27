@@ -1,4 +1,8 @@
-# Android CamSwap (Open Source)
+# Virtual Face Camera
+
+Virtual Face Camera is based on [Android CamSwap](https://github.com/zensu357/Android-CamSwap-OpenSource), using the upstream `v2.8` tag as its development baseline. The original package/namespace is intentionally retained for Xposed and IPC compatibility.
+
+Upstream source: [zensu357/Android-CamSwap-OpenSource](https://github.com/zensu357/Android-CamSwap-OpenSource)
 感谢项目 [android_virtual_cam](https://github.com/w2016561536/android_virtual_cam) 为本项目提供的灵感和代码基础。
 
 Android CamSwap 是一个基于 Xposed 框架的虚拟摄像头模块。它能够拦截 Android 系统相机的预览和拍照请求，并将预览画面替换为用户指定的视频。
@@ -12,6 +16,12 @@ Android CamSwap 是一个基于 Xposed 框架的虚拟摄像头模块。它能�
 *   **全 API 支持**：同时支持 Camera1 (Camera) 和 Camera2 (CameraDevice) API。
 *   **视频替换预览** 🎥：将相机预览画面无缝替换为指定的 MP4 视频。
 *   **音频替换** 🎤：可选择播放自定义 MP3 音频文件，或与替换视频同步。
+*   **画面适配**：
+    *   **FIT / 完整显示**：保持原始宽高比，使用黑边填充多余区域。
+    *   **CROP / 填满裁切**：保持原始宽高比，铺满目标 Surface 并裁切超出部分。
+*   **实时旋转**：支持 0°、90°、180°、270°，切换时不重启目标应用或 Camera session。
+*   **五键悬浮窗快捷切换**：固定顺序为 **点、左、右、张、眨**。
+*   **App 内快捷键绑定**：在 Virtual Face Camera 设置中为五个按键分别选择或解除绑定视频。
 *   **通知栏实时控制**：
     *   ⏭ 切换到下一个 / 上一个视频。
     *   🔄 快速调整视频旋转方向（+90° / -90°）。
@@ -43,14 +53,32 @@ Android CamSwap 是一个基于 Xposed 框架的虚拟摄像头模块。它能�
 5. 重启目标应用的进程。
 
 ### 2. 配置素材
-1. 打开 **CamSwap** 应用，授予必要的文件读写权限。
+1. 打开 **Virtual Face Camera** 应用，授予必要的文件读写权限。
 2. 在「管理」页面导入你的 MP4 视频素材。
-3. 在「设置」页面选择默认视频、配置音频替换、开启通知栏控制等选项。
+3. 在「设置」页面选择默认视频、画面适配模式、五键绑定、音频替换和通知栏控制等选项。
 
 ### 3. 开始使用
 打开任意调用相机的应用，预览画面将被替换为你选择的视频。
 
 > **提示**：若视频画面方向不正确，可在通知栏使用旋转按钮微调，或在设置中手动填写旋转偏移角度。
+
+## 🛠️ 构建
+
+当前项目基于以下 Android 构建环境验证：
+
+*   JDK 17
+*   Android SDK Platform 36
+*   NDK `25.1.8937393`
+*   CMake `3.22.1`
+*   Gradle Wrapper `8.11.1`
+
+标准构建命令：
+
+```bash
+./gradlew assembleRelease
+```
+
+项目使用 ABI split，会按实际配置生成 `arm64-v8a`、`armeabi-v7a` 和 `x86_64` release APK。安装匹配设备架构的 APK 后，再按设备上的 LSPosed 管理器流程启用模块；项目不会自动修改作用域、卸载已有模块或重启设备。
 
 ## 📁 配置文件
 

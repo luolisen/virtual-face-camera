@@ -20,6 +20,8 @@ public final class MediaPlayerManager {
     private String currentPackageName;
     private volatile long lastCamera2PlaybackStartRealtimeMs;
     private volatile int lastCamera2PlaybackDurationMs;
+    private volatile int currentRotationDegrees;
+    private volatile String currentAspectMode = ConfigManager.ASPECT_MODE_FIT;
 
     // ---- Camera1 players (created by Camera1Handler) ----
     MediaPlayer mplayer1;
@@ -84,6 +86,8 @@ public final class MediaPlayerManager {
     void initCamera2Players(Surface readerSurface, Surface readerSurface1,
             Surface previewSurface, Surface previewSurface1) {
 
+        loadRenderingConfig();
+
         MediaSourceDescriptor source = getMediaSource();
 
         if (source.isStream()) {
@@ -145,8 +149,6 @@ public final class MediaPlayerManager {
         // Release any old stream backend
         releaseStreamBackend();
 
-        // 所有渲染器旋转为 0°，rotation_offset 仅通过 captureFrameForYuv 应用于 YUV 截帧
-
         // Choose primary surface: prefer preview, fallback to reader
         Surface primaryTarget = previewSurface != null ? previewSurface : readerSurface;
         if (primaryTarget == null) {
@@ -159,21 +161,25 @@ public final class MediaPlayerManager {
             GLVideoRenderer.releaseSafely(c2_reader_renderer);
             SurfaceRelay.releaseSafely(c2_reader_relay);
             c2_reader_renderer = GLVideoRenderer.createSafely(readerSurface, "c2_reader_stream");
+            configureRenderer(c2_reader_renderer, null);
         }
         if (readerSurface1 != null) {
             GLVideoRenderer.releaseSafely(c2_reader_renderer_1);
             SurfaceRelay.releaseSafely(c2_reader_relay_1);
             c2_reader_renderer_1 = GLVideoRenderer.createSafely(readerSurface1, "c2_reader_1_stream");
+            configureRenderer(c2_reader_renderer_1, null);
         }
         if (previewSurface != null) {
             GLVideoRenderer.releaseSafely(c2_renderer);
             SurfaceRelay.releaseSafely(c2_relay);
             c2_renderer = GLVideoRenderer.createSafely(previewSurface, "c2_preview_stream");
+            configureRenderer(c2_renderer, null);
         }
         if (previewSurface1 != null) {
             GLVideoRenderer.releaseSafely(c2_renderer_1);
             SurfaceRelay.releaseSafely(c2_relay_1);
             c2_renderer_1 = GLVideoRenderer.createSafely(previewSurface1, "c2_preview_1_stream");
+            configureRenderer(c2_renderer_1, null);
         }
 
         // Create stream backend — output to primary GL renderer's input surface
@@ -216,6 +222,11 @@ public final class MediaPlayerManager {
                 @Override
                 public void onCompletion() {
                     LogUtil.log("【CS】流播放完成");
+                }
+
+                @Override
+                public void onVideoSizeChanged(int width, int height, int rotation) {
+                    setSourceSizeForAllRenderers(width, height);
                 }
             });
             streamBackend.open(source);
@@ -306,6 +317,8 @@ public final class MediaPlayerManager {
     /** Restart all active players with current video/stream. */
     void restartAll() {
         synchronized (mediaLock) {
+            loadRenderingConfig();
+            applyRenderingConfigToAllRenderers();
             if (isStreamMode()) {
                 // Stream mode: restart the single stream backend
                 if (streamBackend != null) {
@@ -314,17 +327,19 @@ public final class MediaPlayerManager {
             } else {
                 // Local mode: restart individual MediaPlayers
                 VideoManager.checkProviderAvailability();
-                restartSinglePlayer(mplayer1, c1_renderer_holder, "mplayer1");
-                restartSinglePlayer(mMediaPlayer, c1_renderer_texture, "mMediaPlayer");
-                restartSinglePlayer(c2_reader_player, c2_reader_renderer, "c2_reader_player");
-                restartSinglePlayer(c2_reader_player_1, c2_reader_renderer_1, "c2_reader_player_1");
-                restartSinglePlayer(c2_player, c2_renderer, "c2_player");
-                restartSinglePlayer(c2_player_1, c2_renderer_1, "c2_player_1");
+                restartSinglePlayer(mplayer1, c1_renderer_holder, null, "mplayer1");
+                restartSinglePlayer(mMediaPlayer, c1_renderer_texture, null, "mMediaPlayer");
+                restartSinglePlayer(c2_reader_player, c2_reader_renderer, c2_reader_relay, "c2_reader_player");
+                restartSinglePlayer(c2_reader_player_1, c2_reader_renderer_1, c2_reader_relay_1,
+                        "c2_reader_player_1");
+                restartSinglePlayer(c2_player, c2_renderer, c2_relay, "c2_player");
+                restartSinglePlayer(c2_player_1, c2_renderer_1, c2_relay_1, "c2_player_1");
             }
         }
     }
 
-    private void restartSinglePlayer(MediaPlayer player, GLVideoRenderer renderer, String tag) {
+    private void restartSinglePlayer(MediaPlayer player, GLVideoRenderer renderer,
+            SurfaceRelay relay, String tag) {
         if (player == null)
             return;
         try {
@@ -334,6 +349,10 @@ public final class MediaPlayerManager {
             if (renderer != null && renderer.isInitialized()) {
                 player.setSurface(renderer.getInputSurface());
             }
+            if (relay != null && relay.isInitialized() && (renderer == null || !renderer.isInitialized())) {
+                player.setSurface(relay.getInputSurface());
+            }
+            bindVideoSizeListener(player, renderer, relay);
             android.os.ParcelFileDescriptor pfd = VideoManager.getVideoPFD();
             if (pfd != null) {
                 player.setDataSource(pfd.getFileDescriptor());
@@ -342,18 +361,101 @@ public final class MediaPlayerManager {
                 player.setDataSource(getVideoPath());
             }
             player.prepare();
+            updateVideoSizeFromPlayer(player, renderer, relay);
             player.start();
         } catch (Exception e) {
             LogUtil.log("【CS】重启 " + tag + " 失败: " + android.util.Log.getStackTraceString(e));
         }
     }
 
-    /**
-     * 旋转偏移已更新的通知。渲染器保持 0° 旋转（应用自行处理预览旋转），
-     * rotation_offset 仅在 captureFrameForYuv 中应用于 YUV 截帧/JPEG。
-     */
+    /** Apply a live rotation update to every active GL output. */
     void updateRotation(int degrees) {
-        LogUtil.log("【CS】旋转偏移已更新: " + degrees + "°（渲染器保持0°，仅影响截帧）");
+        currentRotationDegrees = normalizeRotation(degrees);
+        applyRenderingConfigToAllRenderers();
+        LogUtil.log("【CS】旋转偏移已实时应用到渲染器: " + currentRotationDegrees + "°");
+    }
+
+    /** Apply a live FIT/CROP update without rebuilding a camera session. */
+    void updateAspectMode(String aspectMode) {
+        currentAspectMode = normalizeAspectMode(aspectMode);
+        applyRenderingConfigToAllRenderers();
+        LogUtil.log("【CS】画面适配已实时应用: " + currentAspectMode);
+    }
+
+    /** Configure a renderer created by the legacy Camera1 handler. */
+    void configureRenderer(GLVideoRenderer renderer, SurfaceRelay relay) {
+        loadRenderingConfig();
+        applyRenderingConfig(renderer, relay);
+    }
+
+    private void loadRenderingConfig() {
+        ConfigManager config = VideoManager.getConfig();
+        currentRotationDegrees = normalizeRotation(
+                config.getInt(ConfigManager.KEY_VIDEO_ROTATION_OFFSET, 0));
+        currentAspectMode = normalizeAspectMode(
+                config.getString(ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_FIT));
+    }
+
+    private static int normalizeRotation(int degrees) {
+        return ((degrees % 360) + 360) % 360;
+    }
+
+    private static String normalizeAspectMode(String aspectMode) {
+        return ConfigManager.ASPECT_MODE_CROP.equals(aspectMode)
+                ? ConfigManager.ASPECT_MODE_CROP
+                : ConfigManager.ASPECT_MODE_FIT;
+    }
+
+    private void applyRenderingConfigToAllRenderers() {
+        applyRenderingConfig(c1_renderer_holder, null);
+        applyRenderingConfig(c1_renderer_texture, null);
+        applyRenderingConfig(c2_renderer, c2_relay);
+        applyRenderingConfig(c2_renderer_1, c2_relay_1);
+        applyRenderingConfig(c2_reader_renderer, c2_reader_relay);
+        applyRenderingConfig(c2_reader_renderer_1, c2_reader_relay_1);
+    }
+
+    private void applyRenderingConfig(GLVideoRenderer renderer, SurfaceRelay relay) {
+        if (renderer != null) {
+            renderer.setRotation(currentRotationDegrees);
+            renderer.setAspectMode(currentAspectMode);
+        }
+        if (relay != null) {
+            relay.setRotation(currentRotationDegrees);
+            relay.setAspectMode(currentAspectMode);
+        }
+    }
+
+    private void setSourceSizeForAllRenderers(int width, int height) {
+        if (width <= 0 || height <= 0) {
+            return;
+        }
+        setSourceSize(c1_renderer_holder, null, width, height);
+        setSourceSize(c1_renderer_texture, null, width, height);
+        setSourceSize(c2_renderer, c2_relay, width, height);
+        setSourceSize(c2_renderer_1, c2_relay_1, width, height);
+        setSourceSize(c2_reader_renderer, c2_reader_relay, width, height);
+        setSourceSize(c2_reader_renderer_1, c2_reader_relay_1, width, height);
+    }
+
+    private void setSourceSize(GLVideoRenderer renderer, SurfaceRelay relay, int width, int height) {
+        if (renderer != null) {
+            renderer.setSourceSize(width, height);
+        }
+        if (relay != null) {
+            relay.setSourceSize(width, height);
+        }
+    }
+
+    private void bindVideoSizeListener(MediaPlayer player, GLVideoRenderer renderer, SurfaceRelay relay) {
+        player.setOnVideoSizeChangedListener((mp, width, height) -> setSourceSize(renderer, relay, width, height));
+    }
+
+    private void updateVideoSizeFromPlayer(MediaPlayer player, GLVideoRenderer renderer, SurfaceRelay relay) {
+        try {
+            setSourceSize(renderer, relay, player.getVideoWidth(), player.getVideoHeight());
+        } catch (Exception ignored) {
+        }
     }
 
     /** Release all GL renderers. */
@@ -429,9 +531,6 @@ public final class MediaPlayerManager {
             return;
         GLVideoRenderer.releaseSafely(rendererRef[0]);
         SurfaceRelay.releaseSafely(relayRef[0]);
-        // 预览渲染器旋转固定为 0°：应用（如 WhatsApp）会对预览自行应用相机传感器旋转，
-        // CamSwap 不应再叠加旋转，否则本机画面会被双重旋转。
-        // video_rotation_offset 仅在 YUV 截帧时通过 captureFrameForYuv 应用，确保对方画面正确。
         rendererRef[0] = GLVideoRenderer.createSafely(targetSurface, tag);
         if (!playSound)
             player.setVolume(0, 0);
@@ -439,15 +538,15 @@ public final class MediaPlayerManager {
         try {
             if (rendererRef[0] != null) {
                 player.setSurface(rendererRef[0].getInputSurface());
-                rendererRef[0].setRotation(0);
-                LogUtil.log("【CS】【GL】" + tag + " 使用 GL 渲染器 (旋转:0°)");
+                configureRenderer(rendererRef[0], null);
+                LogUtil.log("【CS】【GL】" + tag + " 使用 GL 渲染器 (旋转:" + currentRotationDegrees + "°)");
             } else {
                 LogUtil.log("【CS】【Relay】" + tag + " GL 失败，尝试 SurfaceTexture 中继");
                 relayRef[0] = SurfaceRelay.createSafely(targetSurface, tag);
                 if (relayRef[0] != null) {
                     player.setSurface(relayRef[0].getInputSurface());
-                    relayRef[0].setRotation(0);
-                    LogUtil.log("【CS】【Relay】" + tag + " 使用 Relay 渲染器 (旋转:0°)");
+                    configureRenderer(null, relayRef[0]);
+                    LogUtil.log("【CS】【Relay】" + tag + " 使用 Relay 渲染器 (旋转:" + currentRotationDegrees + "°)");
                 } else {
                     player.setSurface(targetSurface);
                     LogUtil.log("【CS】" + tag + " 回退到直接 Surface（无旋转）");
@@ -473,7 +572,9 @@ public final class MediaPlayerManager {
                 }
                 return false;
             });
+            bindVideoSizeListener(player, rendererRef[0], relayRef[0]);
             player.prepare();
+            updateVideoSizeFromPlayer(player, rendererRef[0], relayRef[0]);
             player.start();
             markCamera2PlaybackStarted(player, tag);
             LogUtil.log("【CS】" + tag + " 已启动播放");

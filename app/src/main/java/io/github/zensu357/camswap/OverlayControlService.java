@@ -6,6 +6,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.content.res.Resources;
+import android.database.ContentObserver;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.Typeface;
@@ -13,6 +14,8 @@ import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -39,6 +42,31 @@ public class OverlayControlService extends Service {
     private ValueAnimator snapAnimator;
     private boolean isExpanded;
     private boolean snappedToRight = true;
+    private final TextView[] shortcutButtons = new TextView[5];
+    private ConfigManager configManager;
+    private ContentObserver configObserver;
+
+    private static final String[] SHORTCUT_CONFIG_KEYS = {
+            ConfigManager.KEY_SHORTCUT_DOT_VIDEO,
+            ConfigManager.KEY_SHORTCUT_LEFT_VIDEO,
+            ConfigManager.KEY_SHORTCUT_RIGHT_VIDEO,
+            ConfigManager.KEY_SHORTCUT_OPEN_VIDEO,
+            ConfigManager.KEY_SHORTCUT_BLINK_VIDEO
+    };
+    private static final int[] SHORTCUT_LABEL_RES = {
+            R.string.shortcut_dot,
+            R.string.shortcut_left,
+            R.string.shortcut_right,
+            R.string.shortcut_open,
+            R.string.shortcut_blink
+    };
+    private static final int[] SHORTCUT_COLORS = {
+            0xFF6650A4,
+            0xFF3F637A,
+            0xFF8A5A2B,
+            0xFF386B52,
+            0xFF66557A
+    };
 
     @Override
     public void onCreate() {
@@ -48,6 +76,18 @@ public class OverlayControlService extends Service {
             return;
         }
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
+        configManager = new ConfigManager(false);
+        configManager.setContext(this);
+        configObserver = new ContentObserver(new Handler(Looper.getMainLooper())) {
+            @Override
+            public void onChange(boolean selfChange) {
+                refreshShortcutButtonStates();
+            }
+        };
+        try {
+            getContentResolver().registerContentObserver(IpcContract.URI_CONFIG, true, configObserver);
+        } catch (Exception ignored) {
+        }
         showOverlay();
     }
 
@@ -62,6 +102,7 @@ public class OverlayControlService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
+        refreshShortcutButtonStates();
         showOverlay();
         return START_STICKY;
     }
@@ -69,6 +110,13 @@ public class OverlayControlService extends Service {
     @Override
     public void onDestroy() {
         super.onDestroy();
+        if (configObserver != null) {
+            try {
+                getContentResolver().unregisterContentObserver(configObserver);
+            } catch (Exception ignored) {
+            }
+            configObserver = null;
+        }
         removeOverlay();
     }
 
@@ -106,11 +154,17 @@ public class OverlayControlService extends Service {
             actionPanel.setElevation(dpScaled(6));
         }
 
-        actionPanel.addView(makeActionButton(getString(R.string.notif_action_next), resolveMonetColor(0xFF6650A4),
-                v -> ControlActionHelper.switchVideo(this, true)));
-        actionPanel.addView(makeSpacer());
-        actionPanel.addView(makeActionButton(getString(R.string.overlay_action_rotate), resolveMonetColor(0xFF7D5260),
-                v -> ControlActionHelper.rotateVideo(this)));
+        for (int i = 0; i < SHORTCUT_CONFIG_KEYS.length; i++) {
+            final int shortcutIndex = i;
+            shortcutButtons[i] = makeActionButton(
+                    getString(SHORTCUT_LABEL_RES[i]),
+                    resolveMonetColor(SHORTCUT_COLORS[i]),
+                    v -> handleShortcut(shortcutIndex));
+            actionPanel.addView(shortcutButtons[i]);
+            if (i < SHORTCUT_CONFIG_KEYS.length - 1) {
+                actionPanel.addView(makeSpacer());
+            }
+        }
 
         bubbleView = new TextView(this);
         bubbleView.setText("CS");
@@ -143,6 +197,7 @@ public class OverlayControlService extends Service {
         layoutParams.y = dpScaled(176);
 
         windowManager.addView(rootView, layoutParams);
+        refreshShortcutButtonStates();
         rootView.post(() -> updateOverlayPosition(false));
     }
 
@@ -158,10 +213,16 @@ public class OverlayControlService extends Service {
         rootView = null;
         actionPanel = null;
         bubbleView = null;
+        for (int i = 0; i < shortcutButtons.length; i++) {
+            shortcutButtons[i] = null;
+        }
     }
 
     private void toggleExpanded() {
         isExpanded = !isExpanded;
+        if (isExpanded) {
+            refreshShortcutButtonStates();
+        }
         if (actionPanel != null) {
             actionPanel.setVisibility(isExpanded ? View.VISIBLE : View.GONE);
         }
@@ -185,13 +246,67 @@ public class OverlayControlService extends Service {
         button.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD));
         button.setSingleLine(true);
         button.setIncludeFontPadding(false);
-        button.setPadding(dpScaled(11), dpScaled(8), dpScaled(11), dpScaled(8));
+        button.setPadding(dpScaled(4), dpScaled(8), dpScaled(4), dpScaled(8));
+        button.setMinWidth(0);
+        button.setMinHeight(0);
+        button.setLayoutParams(new LinearLayout.LayoutParams(dpScaled(36), dpScaled(34)));
         button.setBackground(makeActionBackground(backgroundColor));
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             button.setElevation(dpScaled(1));
         }
         button.setOnClickListener(listener);
         return button;
+    }
+
+    private void handleShortcut(int shortcutIndex) {
+        if (shortcutIndex < 0 || shortcutIndex >= SHORTCUT_CONFIG_KEYS.length) {
+            return;
+        }
+        refreshShortcutButtonStates();
+        String shortcutLabel = getString(SHORTCUT_LABEL_RES[shortcutIndex]);
+        String videoName = configManager == null
+                ? ""
+                : configManager.getShortcutVideo(SHORTCUT_CONFIG_KEYS[shortcutIndex]);
+        if (videoName.isEmpty()) {
+            android.widget.Toast.makeText(
+                    this,
+                    getString(R.string.overlay_shortcut_unbound, shortcutLabel),
+                    android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (videoName.equals(configManager.getString(ConfigManager.KEY_SELECTED_VIDEO, ""))) {
+            return;
+        }
+        if (!ControlActionHelper.selectVideo(this, videoName)) {
+            android.widget.Toast.makeText(
+                    this,
+                    getString(R.string.overlay_shortcut_select_failed),
+                    android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        refreshShortcutButtonStates();
+    }
+
+    private void refreshShortcutButtonStates() {
+        if (configManager == null) {
+            return;
+        }
+        configManager.forceReload();
+        String selectedVideo = configManager.getString(ConfigManager.KEY_SELECTED_VIDEO, "");
+        for (int i = 0; i < shortcutButtons.length; i++) {
+            TextView button = shortcutButtons[i];
+            if (button == null) {
+                continue;
+            }
+            String boundVideo = configManager.getShortcutVideo(SHORTCUT_CONFIG_KEYS[i]);
+            boolean bound = !boundVideo.isEmpty();
+            boolean active = bound && boundVideo.equals(selectedVideo);
+            int color = resolveMonetColor(SHORTCUT_COLORS[i]);
+            button.setAlpha(bound ? 1.0f : 0.42f);
+            button.setTypeface(Typeface.create(Typeface.SANS_SERIF,
+                    active ? Typeface.BOLD_ITALIC : Typeface.BOLD));
+            button.setBackground(makeActionBackground(active ? lightenColor(color, 0.25f) : color, active));
+        }
     }
 
     private GradientDrawable makePanelBackground() {
@@ -203,9 +318,16 @@ public class OverlayControlService extends Service {
     }
 
     private RippleDrawable makeActionBackground(int color) {
+        return makeActionBackground(color, false);
+    }
+
+    private RippleDrawable makeActionBackground(int color, boolean active) {
         GradientDrawable content = new GradientDrawable();
         content.setColor(color);
         content.setCornerRadius(dpScaled(12));
+        if (active) {
+            content.setStroke(Math.max(1, dpScaled(2)), resolveOnAccentColor());
+        }
         return new RippleDrawable(
                 ColorStateList.valueOf(adjustAlpha(resolveOnAccentColor(), 0.18f)),
                 content,

@@ -96,6 +96,13 @@ public final class ExoPlayerBackend implements SurfacePlayerBackend {
 
             player.addListener(new Player.Listener() {
                 @Override
+                public void onVideoSizeChanged(androidx.media3.common.VideoSize videoSize) {
+                    if (listener != null) {
+                        listener.onVideoSizeChanged(videoSize.width, videoSize.height, videoSize.unappliedRotationDegrees);
+                    }
+                }
+
+                @Override
                 public void onPlaybackStateChanged(int playbackState) {
                     if (playbackState == Player.STATE_READY) {
                         reconnectAttempts = 0;

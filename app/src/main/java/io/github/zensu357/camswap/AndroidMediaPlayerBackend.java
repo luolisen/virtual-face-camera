@@ -65,6 +65,9 @@ public final class AndroidMediaPlayerBackend implements SurfacePlayerBackend {
             player.setOnCompletionListener(mp -> {
                 if (listener != null) listener.onCompletion();
             });
+            player.setOnVideoSizeChangedListener((mp, width, height) -> {
+                if (listener != null) listener.onVideoSizeChanged(width, height, 0);
+            });
             player.setOnErrorListener((mp, what, extra) -> {
                 if (listener != null) {
                     listener.onError("MediaPlayer error what=" + what + " extra=" + extra, null);

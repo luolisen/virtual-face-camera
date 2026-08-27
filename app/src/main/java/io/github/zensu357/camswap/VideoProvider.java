@@ -184,7 +184,7 @@ public class VideoProvider extends ContentProvider {
         Log.d("VideoProvider", "openFile: selectedVideo=" + videoName + ", videoDir=" + videoDir.getAbsolutePath()
                 + " exists=" + videoDir.exists());
 
-        if (videoName != null && !videoName.isEmpty()) {
+        if (isVideoInLibrary(videoDir, videoName)) {
             videoFile = new File(videoDir, videoName);
             Log.d("VideoProvider", "openFile: trying " + videoFile.getAbsolutePath() + " exists=" + videoFile.exists()
                     + " canRead=" + videoFile.canRead());
@@ -292,6 +292,11 @@ public class VideoProvider extends ContentProvider {
                 changed = switchVideo(false);
             } else if (IpcContract.METHOD_RANDOM.equals(method)) {
                 changed = pickRandomVideo();
+            } else if (IpcContract.METHOD_SELECT.equals(method)) {
+                String videoName = extras == null
+                        ? null
+                        : extras.getString(IpcContract.EXTRA_VIDEO_NAME);
+                changed = selectVideo(videoName);
             }
 
             if (changed) {
@@ -306,6 +311,66 @@ public class VideoProvider extends ContentProvider {
         Bundle result = new Bundle();
         result.putBoolean(IpcContract.EXTRA_CHANGED, changed);
         return result;
+    }
+
+    /**
+     * Accept only a plain filename. This prevents absolute paths, separators,
+     * dot segments, and other path traversal attempts before filesystem access.
+     */
+    static boolean isSafeVideoName(String videoName) {
+        if (videoName == null || videoName.isEmpty()
+                || ".".equals(videoName) || "..".equals(videoName)) {
+            return false;
+        }
+        if (videoName.indexOf('/') >= 0 || videoName.indexOf('\\') >= 0) {
+            return false;
+        }
+        File nameOnly = new File(videoName);
+        return !nameOnly.isAbsolute() && videoName.equals(nameOnly.getName());
+    }
+
+    /**
+     * Verify that the exact filename is a regular video returned by the same
+     * VideoManager media-library scan used by the rest of the app.
+     */
+    static boolean isVideoInLibrary(File videoDir, String videoName) {
+        if (videoDir == null || !isSafeVideoName(videoName)) {
+            return false;
+        }
+        try {
+            File canonicalDir = videoDir.getCanonicalFile();
+            File candidate = new File(canonicalDir, videoName).getCanonicalFile();
+            if (!canonicalDir.equals(candidate.getParentFile()) || !candidate.isFile()) {
+                return false;
+            }
+            File[] files = VideoManager.listVideoFiles(canonicalDir);
+            if (files == null) {
+                return false;
+            }
+            for (File file : files) {
+                if (videoName.equals(file.getName())
+                        && candidate.equals(file.getCanonicalFile())) {
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            Log.w("VideoProvider", "Video filename validation failed", e);
+        }
+        return false;
+    }
+
+    private boolean selectVideo(String videoName) {
+        File videoDir = new File(ConfigManager.DEFAULT_CONFIG_DIR);
+        if (!isVideoInLibrary(videoDir, videoName)) {
+            Log.w("VideoProvider", "Rejecting invalid or unavailable video selection: " + videoName);
+            return false;
+        }
+        String selectedVideo = configManager.getString(ConfigManager.KEY_SELECTED_VIDEO, "");
+        if (videoName.equals(selectedVideo)) {
+            return false;
+        }
+        configManager.setString(ConfigManager.KEY_SELECTED_VIDEO, videoName);
+        return true;
     }
 
     private boolean switchVideo(boolean next) {

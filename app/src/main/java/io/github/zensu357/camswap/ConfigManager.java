@@ -52,8 +52,18 @@ public class ConfigManager {
     public static final String REPLACE_MODE_VIDEO = "video";
     public static final String REPLACE_MODE_IMAGE = "image";
     public static final String KEY_VIDEO_ROTATION_OFFSET = "video_rotation_offset"; // 视频旋转偏移角度
+    public static final String KEY_VIDEO_ASPECT_MODE = "video_aspect_mode";
+    public static final String ASPECT_MODE_FIT = "fit";
+    public static final String ASPECT_MODE_CROP = "crop";
     public static final String KEY_ENABLE_PHOTO_FAKE = "enable_photo_fake"; // 启用拍照替换 (动态防御)
     public static final String KEY_ENABLE_WHATSAPP_CAMERA2_COMPAT = "enable_whatsapp_camera2_compat";
+
+    // Overlay shortcut bindings. Each key stores a video filename, or an empty string when unbound.
+    public static final String KEY_SHORTCUT_DOT_VIDEO = "shortcut_dot_video";
+    public static final String KEY_SHORTCUT_LEFT_VIDEO = "shortcut_left_video";
+    public static final String KEY_SHORTCUT_RIGHT_VIDEO = "shortcut_right_video";
+    public static final String KEY_SHORTCUT_OPEN_VIDEO = "shortcut_open_video";
+    public static final String KEY_SHORTCUT_BLINK_VIDEO = "shortcut_blink_video";
 
     // Stream media source keys
     public static final String KEY_MEDIA_SOURCE_TYPE = "media_source_type";       // "local" | "stream"
@@ -427,6 +437,28 @@ public class ConfigManager {
 
     public void setString(String key, String value) {
         updateConfigAndSave(config -> config.put(key, value));
+    }
+
+    public String getShortcutVideo(String key) {
+        if (!isShortcutVideoKey(key)) {
+            return "";
+        }
+        return getString(key, "");
+    }
+
+    public void setShortcutVideo(String key, String videoName) {
+        if (!isShortcutVideoKey(key)) {
+            throw new IllegalArgumentException("Unknown shortcut binding key: " + key);
+        }
+        setString(key, videoName == null ? "" : videoName);
+    }
+
+    public static boolean isShortcutVideoKey(String key) {
+        return KEY_SHORTCUT_DOT_VIDEO.equals(key)
+                || KEY_SHORTCUT_LEFT_VIDEO.equals(key)
+                || KEY_SHORTCUT_RIGHT_VIDEO.equals(key)
+                || KEY_SHORTCUT_OPEN_VIDEO.equals(key)
+                || KEY_SHORTCUT_BLINK_VIDEO.equals(key);
     }
 
     private void save() {

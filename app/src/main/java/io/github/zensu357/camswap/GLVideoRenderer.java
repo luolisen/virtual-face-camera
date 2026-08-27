@@ -62,6 +62,9 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
 
     // State
     private volatile int mRotationDegrees = 0;
+    private volatile int mSourceWidth = 0;
+    private volatile int mSourceHeight = 0;
+    private volatile String mAspectMode = ConfigManager.ASPECT_MODE_FIT;
     private volatile boolean mReleased = false;
     private boolean mInitialized = false;
     private volatile int mSurfaceWidth = 0;
@@ -154,6 +157,33 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
         return mRotationDegrees;
     }
 
+    /** Set the dimensions reported by the active media playback chain. */
+    public void setSourceSize(int width, int height) {
+        if (width > 0 && height > 0) {
+            mSourceWidth = width;
+            mSourceHeight = height;
+        }
+    }
+
+    public int getSourceWidth() {
+        return mSourceWidth;
+    }
+
+    public int getSourceHeight() {
+        return mSourceHeight;
+    }
+
+    /** Set FIT (default) or CROP rendering. Unknown values fall back to FIT. */
+    public void setAspectMode(String aspectMode) {
+        mAspectMode = ConfigManager.ASPECT_MODE_CROP.equals(aspectMode)
+                ? ConfigManager.ASPECT_MODE_CROP
+                : ConfigManager.ASPECT_MODE_FIT;
+    }
+
+    public String getAspectMode() {
+        return mAspectMode;
+    }
+
     @Override
     public void onFrameAvailable(SurfaceTexture surfaceTexture) {
         if (mReleased || !mInitialized)
@@ -196,13 +226,6 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
         mInputSurfaceTexture.updateTexImage();
         mInputSurfaceTexture.getTransformMatrix(mSTMatrix);
 
-        // Update rotation matrix
-        if (mRotationDegrees == 0) {
-            Matrix.setIdentityM(mRotMatrix, 0);
-        } else {
-            Matrix.setRotateM(mRotMatrix, 0, -mRotationDegrees, 0, 0, 1.0f);
-        }
-
         // Query surface dimensions for viewport
         int[] width = new int[1];
         int[] height = new int[1];
@@ -218,6 +241,20 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
         // Set viewport to the EGL surface's actual dimensions
         if (width[0] > 0 && height[0] > 0) {
             GLES20.glViewport(0, 0, width[0], height[0]);
+        }
+
+        // Scale in output coordinates, then rotate. A 90/270 degree output
+        // swaps the effective source dimensions before calculating FIT/CROP.
+        // The black clear above supplies FIT letterboxing.
+        Matrix.setIdentityM(mRotMatrix, 0);
+        if (width[0] > 0 && height[0] > 0 && mSourceWidth > 0 && mSourceHeight > 0) {
+            VideoAspectLayout.Layout layout = VideoAspectLayout.calculate(
+                    mSourceWidth, mSourceHeight, width[0], height[0],
+                    mRotationDegrees, mAspectMode);
+            Matrix.scaleM(mRotMatrix, 0, layout.scaleX, layout.scaleY, 1.0f);
+        }
+        if (mRotationDegrees != 0) {
+            Matrix.rotateM(mRotMatrix, 0, -mRotationDegrees, 0, 0, 1.0f);
         }
 
         GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);

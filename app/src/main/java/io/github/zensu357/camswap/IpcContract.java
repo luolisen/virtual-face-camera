@@ -29,6 +29,8 @@ public final class IpcContract {
     public static final String METHOD_NEXT = "next";
     public static final String METHOD_PREV = "prev";
     public static final String METHOD_RANDOM = "random";
+    public static final String METHOD_SELECT = "select";
+    public static final String EXTRA_VIDEO_NAME = "video_name";
 
     private IpcContract() {
     }
