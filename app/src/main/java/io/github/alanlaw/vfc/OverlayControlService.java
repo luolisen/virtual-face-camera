@@ -45,7 +45,9 @@ public class OverlayControlService extends Service {
     private TextView bubbleView;
     private TextView presetButton;
     private TextView rotationButton;
+    private TextView viewportButton;
     private PopupWindow presetPopup;
+    private PopupWindow viewportPopup;
     private WindowManager.LayoutParams layoutParams;
     private ValueAnimator snapAnimator;
     private boolean isExpanded;
@@ -189,6 +191,13 @@ public class OverlayControlService extends Service {
                 v -> handleRotation());
         actionPanel.addView(rotationButton);
 
+        actionPanel.addView(makeSpacer());
+        viewportButton = makeActionButton(
+                getString(R.string.overlay_action_viewport),
+                resolveMonetColor(0xFF4F6475),
+                v -> toggleViewportPopup());
+        actionPanel.addView(viewportButton);
+
         actionScroll = new HorizontalScrollView(this);
         actionScroll.setHorizontalScrollBarEnabled(false);
         actionScroll.setFillViewport(false);
@@ -242,6 +251,7 @@ public class OverlayControlService extends Service {
     private void removeOverlay() {
         cancelSnapAnimator();
         dismissPresetPopup();
+        dismissViewportPopup();
         if (windowManager != null && rootView != null) {
             try {
                 windowManager.removeView(rootView);
@@ -255,6 +265,7 @@ public class OverlayControlService extends Service {
         bubbleView = null;
         presetButton = null;
         rotationButton = null;
+        viewportButton = null;
         for (int i = 0; i < shortcutButtons.length; i++) {
             shortcutButtons[i] = null;
         }
@@ -266,6 +277,7 @@ public class OverlayControlService extends Service {
             refreshShortcutButtonStates();
         } else {
             dismissPresetPopup();
+            dismissViewportPopup();
         }
         if (actionPanel != null) {
             actionPanel.setVisibility(isExpanded ? View.VISIBLE : View.GONE);
@@ -321,10 +333,11 @@ public class OverlayControlService extends Service {
                     android.widget.Toast.LENGTH_SHORT).show();
             return;
         }
-        if (videoName.equals(configManager.getString(ConfigManager.KEY_SELECTED_VIDEO, ""))) {
-            return;
-        }
-        if (!ControlActionHelper.selectVideo(this, videoName)) {
+        String currentPresetId = configManager == null
+                ? ""
+                : configManager.getString(ConfigManager.KEY_CURRENT_PRESET_ID, "");
+        if (!ControlActionHelper.selectPresetShortcut(
+                this, currentPresetId, SHORTCUT_KEYS[shortcutIndex])) {
             android.widget.Toast.makeText(
                     this,
                     getString(R.string.overlay_shortcut_select_failed),
@@ -340,6 +353,117 @@ public class OverlayControlService extends Service {
                 this,
                 getString(R.string.overlay_rotation_status, rotation),
                 android.widget.Toast.LENGTH_SHORT).show();
+    }
+
+    private void toggleViewportPopup() {
+        if (viewportPopup != null && viewportPopup.isShowing()) {
+            dismissViewportPopup();
+            return;
+        }
+        showViewportPopup();
+    }
+
+    private void showViewportPopup() {
+        if (configManager == null || viewportButton == null || rootView == null) {
+            return;
+        }
+        configManager.forceReload();
+        String aspectMode = configManager.getString(
+                ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_DYNAMIC);
+        if (!ConfigManager.ASPECT_MODE_DYNAMIC.equals(aspectMode)) {
+            android.widget.Toast.makeText(
+                    this,
+                    getString(R.string.overlay_viewport_dynamic_only),
+                    android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (configManager.getActiveBinding() == null) {
+            android.widget.Toast.makeText(
+                    this,
+                    getString(R.string.overlay_viewport_no_active),
+                    android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        dismissPresetPopup();
+        LinearLayout controls = new LinearLayout(this);
+        controls.setOrientation(LinearLayout.VERTICAL);
+        controls.setGravity(Gravity.CENTER_HORIZONTAL);
+        controls.setPadding(dp(8), dp(8), dp(8), dp(8));
+
+        LinearLayout upRow = makeViewportRow();
+        upRow.addView(makeViewportControl("↑", ConfigManager.VIEWPORT_DIRECTION_UP));
+        controls.addView(upRow);
+
+        LinearLayout middleRow = makeViewportRow();
+        middleRow.addView(makeViewportControl("←", ConfigManager.VIEWPORT_DIRECTION_LEFT));
+        middleRow.addView(makeViewportControl("中", null));
+        middleRow.addView(makeViewportControl("→", ConfigManager.VIEWPORT_DIRECTION_RIGHT));
+        controls.addView(middleRow);
+
+        LinearLayout downRow = makeViewportRow();
+        downRow.addView(makeViewportControl("↓", ConfigManager.VIEWPORT_DIRECTION_DOWN));
+        controls.addView(downRow);
+
+        viewportPopup = new PopupWindow(controls, dp(174), dp(174), true);
+        viewportPopup.setBackgroundDrawable(new ColorDrawable(resolvePanelColor()));
+        viewportPopup.setOutsideTouchable(true);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            viewportPopup.setElevation(dp(6));
+        }
+        try {
+            viewportPopup.showAsDropDown(viewportButton, 0, dp(4));
+        } catch (Exception e) {
+            dismissViewportPopup();
+        }
+    }
+
+    private LinearLayout makeViewportRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER);
+        row.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(50)));
+        return row;
+    }
+
+    private TextView makeViewportControl(String text, String direction) {
+        TextView button = makeActionButton(text, resolveMonetColor(0xFF4F6475),
+                v -> handleViewport(direction));
+        button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f);
+        button.setLayoutParams(new LinearLayout.LayoutParams(dp(44), dp(40)));
+        return button;
+    }
+
+    private void handleViewport(String direction) {
+        if (configManager == null) {
+            return;
+        }
+        configManager.forceReload();
+        String aspectMode = configManager.getString(
+                ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_DYNAMIC);
+        if (!ConfigManager.ASPECT_MODE_DYNAMIC.equals(aspectMode)) {
+            android.widget.Toast.makeText(
+                    this,
+                    getString(R.string.overlay_viewport_dynamic_only),
+                    android.widget.Toast.LENGTH_SHORT).show();
+            dismissViewportPopup();
+            return;
+        }
+        if (configManager.getActiveBinding() == null) {
+            android.widget.Toast.makeText(
+                    this,
+                    getString(R.string.overlay_viewport_no_active),
+                    android.widget.Toast.LENGTH_SHORT).show();
+            dismissViewportPopup();
+            return;
+        }
+        boolean changed = direction == null
+                ? ControlActionHelper.resetViewport(this)
+                : ControlActionHelper.moveViewport(this, direction);
+        if (changed) {
+            refreshShortcutButtonStates();
+        }
     }
 
     private void refreshShortcutButtonStates() {
@@ -369,6 +493,7 @@ public class OverlayControlService extends Service {
             dismissPresetPopup();
             return;
         }
+        dismissViewportPopup();
         showPresetPopup();
     }
 
@@ -473,6 +598,16 @@ public class OverlayControlService extends Service {
             } catch (Exception ignored) {
             }
             presetPopup = null;
+        }
+    }
+
+    private void dismissViewportPopup() {
+        if (viewportPopup != null) {
+            try {
+                viewportPopup.dismiss();
+            } catch (Exception ignored) {
+            }
+            viewportPopup = null;
         }
     }
 

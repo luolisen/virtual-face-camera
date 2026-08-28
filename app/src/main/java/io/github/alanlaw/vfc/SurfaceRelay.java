@@ -43,6 +43,7 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
     private int maPositionHandle;
     private int maTextureHandle;
     private int muSTMatrixHandle;
+    private int muCropMatrixHandle;
     private int muRotMatrixHandle;
 
     // Input/Output
@@ -52,15 +53,22 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
 
     // Matrices
     private final float[] mSTMatrix = new float[16];
+    private final float[] mCropMatrix = new float[16];
     private final float[] mRotMatrix = new float[16];
 
     // State
     private volatile int mRotationDegrees = 0;
     private volatile int mSourceWidth = 0;
     private volatile int mSourceHeight = 0;
-    private volatile String mAspectMode = ConfigManager.ASPECT_MODE_FIT;
+    private volatile String mAspectMode = ConfigManager.ASPECT_MODE_DYNAMIC;
     private final RenderTargetRole mRenderTargetRole;
     private volatile HostWindowGeometry.Snapshot mHostWindowGeometry = HostWindowGeometry.Snapshot.unavailable();
+    private volatile String mActivePresetId = "";
+    private volatile String mActiveShortcutKey = "";
+    private volatile float mSourceAnchorU = 0.5f;
+    private volatile float mSourceAnchorV = 0.5f;
+    private volatile int mViewportMoveStepPercent = ConfigManager.DEFAULT_VIEWPORT_MOVE_STEP_PERCENT;
+    private volatile VirtualSensorGeometry.NormalizedRect mLastValidDynamicCrop;
     private volatile boolean mReleased = false;
     private boolean mInitialized = false;
     private String mLastAspectDiagnostic;
@@ -88,6 +96,7 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
         mTargetSurface = targetSurface;
         Matrix.setIdentityM(mRotMatrix, 0);
         Matrix.setIdentityM(mSTMatrix, 0);
+        Matrix.setIdentityM(mCropMatrix, 0);
 
         mGLThread = new HandlerThread("GLRelay-" + tag);
         mGLThread.start();
@@ -136,15 +145,36 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
     }
 
     public void setAspectMode(String aspectMode) {
-        mAspectMode = ConfigManager.ASPECT_MODE_CROP.equals(aspectMode)
-                ? ConfigManager.ASPECT_MODE_CROP
-                : ConfigManager.ASPECT_MODE_FIT;
+        if (ConfigManager.ASPECT_MODE_FIT.equals(aspectMode)) {
+            mAspectMode = ConfigManager.ASPECT_MODE_FIT;
+        } else if (ConfigManager.ASPECT_MODE_CROP.equals(aspectMode)) {
+            mAspectMode = ConfigManager.ASPECT_MODE_CROP;
+        } else {
+            mAspectMode = ConfigManager.ASPECT_MODE_DYNAMIC;
+        }
     }
 
     public void setHostWindowGeometry(HostWindowGeometry.Snapshot geometry) {
         mHostWindowGeometry = geometry == null
                 ? HostWindowGeometry.Snapshot.unavailable()
                 : geometry;
+    }
+
+    /** Apply the active preset shortcut's decoded-source viewport anchor. */
+    public void setViewportState(ConfigManager.ActiveBinding activeBinding, int stepPercent) {
+        mViewportMoveStepPercent = Math.max(ConfigManager.MIN_VIEWPORT_MOVE_STEP_PERCENT,
+                Math.min(ConfigManager.MAX_VIEWPORT_MOVE_STEP_PERCENT, stepPercent));
+        if (activeBinding == null || activeBinding.getViewport() == null) {
+            mActivePresetId = "";
+            mActiveShortcutKey = "";
+            mSourceAnchorU = 0.5f;
+            mSourceAnchorV = 0.5f;
+            return;
+        }
+        mActivePresetId = activeBinding.getPresetId();
+        mActiveShortcutKey = activeBinding.getShortcutKey();
+        mSourceAnchorU = activeBinding.getViewport().getAnchorU();
+        mSourceAnchorV = activeBinding.getViewport().getAnchorV();
     }
 
     @Override
@@ -196,19 +226,36 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
                 GLES20.glViewport(0, 0, surfaceWidth[0], surfaceHeight[0]);
             }
 
+            Matrix.setIdentityM(mRotMatrix, 0);
             RenderTargetGeometry.Calculation geometry = RenderTargetGeometry.calculate(
                     surfaceWidth[0], surfaceHeight[0], mHostWindowGeometry, mRenderTargetRole);
             VideoAspectLayout.Layout layout = VideoAspectLayout.calculate(
                     mSourceWidth, mSourceHeight,
-                    geometry.logicalTargetWidth, geometry.logicalTargetHeight,
+                    surfaceWidth[0], surfaceHeight[0],
                     mRotationDegrees, mAspectMode);
-
-            Matrix.setIdentityM(mRotMatrix, 0);
-            if (surfaceWidth[0] > 0 && surfaceHeight[0] > 0
+            VirtualSensorGeometry.Calculation dynamicGeometry = null;
+            VirtualSensorGeometry.NormalizedRect dynamicCrop = null;
+            Matrix.setIdentityM(mCropMatrix, 0);
+            if (ConfigManager.ASPECT_MODE_DYNAMIC.equals(mAspectMode)) {
+                dynamicGeometry = VirtualSensorGeometry.calculate(
+                        mSourceWidth, mSourceHeight,
+                        surfaceWidth[0], surfaceHeight[0], mRotationDegrees,
+                        mSourceAnchorU, mSourceAnchorV, mRenderTargetRole);
+                if (dynamicGeometry.valid) {
+                    mLastValidDynamicCrop = dynamicGeometry.sourceCropRect;
+                    dynamicCrop = dynamicGeometry.sourceCropRect;
+                } else if (mLastValidDynamicCrop != null) {
+                    dynamicCrop = mLastValidDynamicCrop;
+                } else {
+                    dynamicCrop = new VirtualSensorGeometry.NormalizedRect(0.0f, 0.0f, 1.0f, 1.0f);
+                }
+                float[] cropMatrix = VirtualSensorGeometry.buildTextureCropMatrix(dynamicCrop);
+                System.arraycopy(cropMatrix, 0, mCropMatrix, 0, mCropMatrix.length);
+            } else if (surfaceWidth[0] > 0 && surfaceHeight[0] > 0
                     && mSourceWidth > 0 && mSourceHeight > 0) {
                 Matrix.scaleM(mRotMatrix, 0, layout.scaleX, layout.scaleY, 1.0f);
             }
-            logAspectIfChanged(geometry, layout);
+            logAspectIfChanged(geometry, layout, dynamicGeometry, dynamicCrop);
             if (mRotationDegrees != 0) {
                 Matrix.rotateM(mRotMatrix, 0, -mRotationDegrees, 0, 0, 1.0f);
             }
@@ -222,6 +269,7 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
             GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, mTextureId);
 
             GLES20.glUniformMatrix4fv(muSTMatrixHandle, 1, false, mSTMatrix, 0);
+            GLES20.glUniformMatrix4fv(muCropMatrixHandle, 1, false, mCropMatrix, 0);
             GLES20.glUniformMatrix4fv(muRotMatrixHandle, 1, false, mRotMatrix, 0);
 
             mVertexBuffer.position(0);
@@ -324,6 +372,7 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
         maPositionHandle = GLES20.glGetAttribLocation(mProgram, "aPosition");
         maTextureHandle = GLES20.glGetAttribLocation(mProgram, "aTextureCoord");
         muSTMatrixHandle = GLES20.glGetUniformLocation(mProgram, "uSTMatrix");
+        muCropMatrixHandle = GLES20.glGetUniformLocation(mProgram, "uCropMatrix");
         muRotMatrixHandle = GLES20.glGetUniformLocation(mProgram, "uRotMatrix");
 
         int[] textures = new int[1];
@@ -395,20 +444,40 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
     }
 
     private void logAspectIfChanged(RenderTargetGeometry.Calculation geometry,
-            VideoAspectLayout.Layout layout) {
+            VideoAspectLayout.Layout layout,
+            VirtualSensorGeometry.Calculation dynamicGeometry,
+            VirtualSensorGeometry.NormalizedRect dynamicCrop) {
+        float sourceAspect = dynamicGeometry == null
+                ? layout.sourceAspect : dynamicGeometry.sourceAspect;
+        float targetAspect = dynamicGeometry == null
+                ? layout.targetAspect : dynamicGeometry.targetAspect;
+        float scaleX = dynamicGeometry == null ? layout.scaleX : 1.0f;
+        float scaleY = dynamicGeometry == null ? layout.scaleY : 1.0f;
+        String logicalAnchor = dynamicGeometry == null
+                ? "-"
+                : String.format(Locale.US, "%.5f,%.5f",
+                        dynamicGeometry.logicalAnchorU, dynamicGeometry.logicalAnchorV);
+        String sourceAnchor = String.format(Locale.US, "%.5f,%.5f",
+                mSourceAnchorU, mSourceAnchorV);
+        String crop = dynamicCrop == null ? "-" : dynamicCrop.toString();
         String diagnostic = String.format(Locale.US,
-                "role=%s|source=%dx%d|rawTarget=%dx%d|host=%dx%d|logicalTarget=%dx%d"
+                "role=%s|renderer=%s|source=%dx%d|rawTarget=%dx%d|host=%dx%d|logicalTarget=%dx%d"
                         + "|displayRotation=%d|videoRotation=%d|mode=%s|sourceAspect=%.5f"
-                        + "|targetAspect=%.5f|scaleX=%.5f|scaleY=%.5f|orientationCompensated=%s",
+                        + "|targetAspect=%.5f|scaleX=%.5f|scaleY=%.5f|orientationCompensated=%s"
+                        + "|hostGeometryAffectsRendering=false|activePreset=%s|activeShortcut=%s"
+                        + "|sourceAnchor=%s|logicalAnchor=%s|crop=%s|step=%d",
                 geometry.role,
+                mTag,
                 mSourceWidth, mSourceHeight,
                 geometry.rawTargetWidth, geometry.rawTargetHeight,
                 geometry.hostWidth, geometry.hostHeight,
                 geometry.logicalTargetWidth, geometry.logicalTargetHeight,
                 geometry.displayRotation, mRotationDegrees, mAspectMode,
-                layout.sourceAspect, layout.targetAspect,
-                layout.scaleX, layout.scaleY,
-                geometry.orientationCompensated);
+                sourceAspect, targetAspect,
+                scaleX, scaleY,
+                geometry.orientationCompensated,
+                mActivePresetId, mActiveShortcutKey,
+                sourceAnchor, logicalAnchor, crop, mViewportMoveStepPercent);
         if (!diagnostic.equals(mLastAspectDiagnostic)) {
             mLastAspectDiagnostic = diagnostic;
             LogUtil.log("[VFC][Aspect] " + diagnostic);

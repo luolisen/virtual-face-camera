@@ -51,6 +51,67 @@ public final class ControlActionHelper {
         }
     }
 
+    /** Select the binding from one exact preset/shortcut pair through IPC. */
+    public static boolean selectPresetShortcut(Context context, String presetId,
+            String shortcutKey) {
+        if (context == null || presetId == null || presetId.isEmpty()
+                || shortcutKey == null || shortcutKey.isEmpty()) {
+            return false;
+        }
+        try {
+            Bundle extras = new Bundle();
+            extras.putString(IpcContract.EXTRA_PRESET_ID, presetId);
+            extras.putString(IpcContract.EXTRA_SHORTCUT_KEY, shortcutKey);
+            Bundle result = context.getContentResolver().call(
+                    IpcContract.CONTENT_URI,
+                    IpcContract.METHOD_SELECT_PRESET_SHORTCUT,
+                    null,
+                    extras);
+            return result != null && result.getBoolean(IpcContract.EXTRA_CHANGED, false);
+        } catch (Throwable t) {
+            LogUtil.log("【CS】ControlActionHelper preset shortcut select failed: " + t);
+            return false;
+        }
+    }
+
+    /** Move the currently active preset binding's dynamic viewport. */
+    public static boolean moveViewport(Context context, String direction) {
+        if (context == null || direction == null || direction.isEmpty()) {
+            return false;
+        }
+        try {
+            Bundle extras = new Bundle();
+            extras.putString(IpcContract.EXTRA_VIEWPORT_DIRECTION, direction);
+            Bundle result = context.getContentResolver().call(
+                    IpcContract.CONTENT_URI,
+                    IpcContract.METHOD_MOVE_VIEWPORT,
+                    null,
+                    extras);
+            return result != null && result.getBoolean(IpcContract.EXTRA_CHANGED, false);
+        } catch (Throwable t) {
+            LogUtil.log("【CS】ControlActionHelper viewport move failed: " + t);
+            return false;
+        }
+    }
+
+    /** Reset the currently active preset binding's dynamic viewport to center. */
+    public static boolean resetViewport(Context context) {
+        if (context == null) {
+            return false;
+        }
+        try {
+            Bundle result = context.getContentResolver().call(
+                    IpcContract.CONTENT_URI,
+                    IpcContract.METHOD_RESET_VIEWPORT,
+                    null,
+                    null);
+            return result != null && result.getBoolean(IpcContract.EXTRA_CHANGED, false);
+        } catch (Throwable t) {
+            LogUtil.log("【CS】ControlActionHelper viewport reset failed: " + t);
+            return false;
+        }
+    }
+
     public static void setOverlayEnabled(Context context, boolean enabled) {
         ConfigManager configManager = new ConfigManager();
         configManager.setContext(context);
@@ -78,7 +139,6 @@ public final class ControlActionHelper {
 
         int newIndex = currentIndex == -1 ? 0
                 : (next ? (currentIndex + 1) % files.length : (currentIndex - 1 + files.length) % files.length);
-        configManager.setString(ConfigManager.KEY_SELECTED_VIDEO, files[newIndex].getName());
-        return true;
+        return configManager.setSelectedVideoAndClearActive(files[newIndex].getName());
     }
 }

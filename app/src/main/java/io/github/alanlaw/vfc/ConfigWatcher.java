@@ -12,6 +12,8 @@ import android.os.Looper;
 import io.github.alanlaw.vfc.utils.LogUtil;
 import io.github.alanlaw.vfc.utils.VideoManager;
 
+import java.util.Locale;
+
 /**
  * Watches for configuration changes via ContentObserver, FileObserver, and
  * BroadcastReceiver, then notifies via {@link Callback}.
@@ -22,6 +24,9 @@ public final class ConfigWatcher {
         void onMediaSourceChanged();
 
         void onRenderingConfigChanged(int degrees, String aspectMode);
+
+        /** A viewport-only change must not restart the media player. */
+        void onViewportChanged();
     }
 
     private final Callback callback;
@@ -148,6 +153,8 @@ public final class ConfigWatcher {
                 || !oldState.streamUrl.equals(newState.streamUrl);
         boolean renderingChanged = oldState.rotation != newState.rotation
                 || !oldState.aspectMode.equals(newState.aspectMode);
+        boolean viewportChanged = !oldState.viewportFingerprint.equals(
+                newState.viewportFingerprint);
 
         if (mediaChanged) {
             VideoManager.updateVideoPath(false);
@@ -159,7 +166,11 @@ public final class ConfigWatcher {
                     + "° 适配=" + newState.aspectMode);
             callback.onRenderingConfigChanged(newState.rotation, newState.aspectMode);
         }
-        if (!mediaChanged && !renderingChanged) {
+        if (viewportChanged) {
+            LogUtil.log("【CS】配置更新: 动态取景变化，仅更新渲染器");
+            callback.onViewportChanged();
+        }
+        if (!mediaChanged && !renderingChanged && !viewportChanged) {
             LogUtil.log("【CS】配置更新: 无变化");
         }
     }
@@ -173,10 +184,11 @@ public final class ConfigWatcher {
         final String streamUrl;
         final int rotation;
         final String aspectMode;
+        final String viewportFingerprint;
 
         private ConfigState(String selectedVideo, String selectedImage, String replaceMode,
                 boolean forcePrivateDir, String sourceType, String streamUrl,
-                int rotation, String aspectMode) {
+                int rotation, String aspectMode, String viewportFingerprint) {
             this.selectedVideo = selectedVideo;
             this.selectedImage = selectedImage;
             this.replaceMode = replaceMode;
@@ -185,6 +197,7 @@ public final class ConfigWatcher {
             this.streamUrl = streamUrl;
             this.rotation = rotation;
             this.aspectMode = aspectMode;
+            this.viewportFingerprint = viewportFingerprint;
         }
 
         static ConfigState capture(ConfigManager config) {
@@ -196,7 +209,22 @@ public final class ConfigWatcher {
                     config.getString(ConfigManager.KEY_MEDIA_SOURCE_TYPE, ConfigManager.MEDIA_SOURCE_LOCAL),
                     config.getString(ConfigManager.KEY_STREAM_URL, ""),
                     config.getInt(ConfigManager.KEY_VIDEO_ROTATION_OFFSET, 0),
-                    config.getString(ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_FIT));
+                    config.getString(ConfigManager.KEY_VIDEO_ASPECT_MODE,
+                            ConfigManager.ASPECT_MODE_DYNAMIC),
+                    captureViewportFingerprint(config));
+        }
+
+        private static String captureViewportFingerprint(ConfigManager config) {
+            String presetId = config.getString(
+                    ConfigManager.KEY_ACTIVE_BINDING_PRESET_ID, "");
+            String shortcutKey = config.getString(
+                    ConfigManager.KEY_ACTIVE_BINDING_SHORTCUT, "");
+            ConfigManager.Viewport viewport = config.getPresetShortcutViewport(
+                    presetId, shortcutKey);
+            return String.format(Locale.US, "%s|%s|%.6f|%.6f|%d",
+                    presetId, shortcutKey,
+                    viewport.getAnchorU(), viewport.getAnchorV(),
+                    config.getViewportMoveStepPercent());
         }
     }
 

@@ -61,6 +61,7 @@ import io.github.alanlaw.vfc.BuildConfig
 import io.github.alanlaw.vfc.ConfigManager
 import io.github.alanlaw.vfc.R
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -264,15 +265,50 @@ fun SettingsScreen(viewModel: MainViewModel) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 FilterChip(
-                        selected = uiState.videoAspectMode != ConfigManager.ASPECT_MODE_CROP,
+                        modifier = Modifier.weight(1f),
+                        selected = uiState.videoAspectMode == ConfigManager.ASPECT_MODE_DYNAMIC,
+                        onClick = { viewModel.setVideoAspectMode(ConfigManager.ASPECT_MODE_DYNAMIC) },
+                        label = { Text(stringResource(R.string.video_aspect_dynamic)) }
+                )
+                FilterChip(
+                        modifier = Modifier.weight(1f),
+                        selected = uiState.videoAspectMode == ConfigManager.ASPECT_MODE_FIT,
                         onClick = { viewModel.setVideoAspectMode(ConfigManager.ASPECT_MODE_FIT) },
                         label = { Text(stringResource(R.string.video_aspect_fit)) }
                 )
                 FilterChip(
+                        modifier = Modifier.weight(1f),
                         selected = uiState.videoAspectMode == ConfigManager.ASPECT_MODE_CROP,
                         onClick = { viewModel.setVideoAspectMode(ConfigManager.ASPECT_MODE_CROP) },
                         label = { Text(stringResource(R.string.video_aspect_crop)) }
                 )
+            }
+
+            AnimatedVisibility(
+                    visible = uiState.videoAspectMode == ConfigManager.ASPECT_MODE_DYNAMIC,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+            ) {
+                Column(modifier = Modifier.padding(start = 36.dp, top = 8.dp)) {
+                    Text(
+                            text = stringResource(
+                                    R.string.settings_viewport_step,
+                                    uiState.viewportMoveStepPercent
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Slider(
+                            value = uiState.viewportMoveStepPercent.toFloat(),
+                            onValueChange = { value ->
+                                viewModel.setViewportMoveStepPercent(value.roundToInt())
+                            },
+                            valueRange = ConfigManager.MIN_VIEWPORT_MOVE_STEP_PERCENT.toFloat()..
+                                    ConfigManager.MAX_VIEWPORT_MOVE_STEP_PERCENT.toFloat(),
+                            steps = ConfigManager.MAX_VIEWPORT_MOVE_STEP_PERCENT -
+                                    ConfigManager.MIN_VIEWPORT_MOVE_STEP_PERCENT - 1
+                    )
+                }
             }
 
         }

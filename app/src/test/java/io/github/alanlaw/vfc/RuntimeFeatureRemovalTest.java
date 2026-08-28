@@ -8,9 +8,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 /**
- * Source-level guardrails for v0.2.1 features that must stay removed at runtime.
+ * Source-level guardrails for removed features that must stay absent at runtime.
  * These checks intentionally cover wiring and packaging contracts that cannot be
  * observed through the JVM-only Android unit-test runtime.
  */
@@ -22,6 +23,8 @@ public class RuntimeFeatureRemovalTest {
         String bridge = readProjectFile(
                 "app/src/main/java/io/github/alanlaw/vfc/utils/CameraServerBridge.kt");
         String cmake = readProjectFile("app/src/main/cpp/CMakeLists.txt");
+        String watcher = readProjectFile(
+                "app/src/main/java/io/github/alanlaw/vfc/ConfigWatcher.java");
 
         assertFalse(hookMain.contains("new MicrophoneHandler"));
         assertFalse(hookMain.contains("NativeAudioHook.init"));
@@ -30,6 +33,18 @@ public class RuntimeFeatureRemovalTest {
         assertFalse(cmake.contains("camswap-native-hook"));
         assertFalse(Files.exists(projectPath("app/src/main/java/io/github/alanlaw/vfc/MicrophoneHandler.java")));
         assertFalse(Files.exists(projectPath("app/src/main/java/io/github/alanlaw/vfc/NativeAudioHook.java")));
+
+        int viewportCallback = hookMain.indexOf("public void onViewportChanged()");
+        assertTrue(viewportCallback >= 0);
+        int nextMethod = hookMain.indexOf("private static void switchVideo", viewportCallback);
+        assertTrue(nextMethod > viewportCallback);
+        String viewportBody = hookMain.substring(viewportCallback,
+                nextMethod);
+        assertTrue(viewportBody.contains("playerManager.updateViewport()"));
+        assertFalse(viewportBody.contains("playerManager.restartAll()"));
+        assertTrue(watcher.contains("boolean viewportChanged"));
+        assertTrue(watcher.contains("callback.onViewportChanged()"));
+        assertTrue(watcher.contains("!mediaChanged && !renderingChanged && !viewportChanged"));
     }
 
     @Test

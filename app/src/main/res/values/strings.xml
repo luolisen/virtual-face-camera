@@ -65,9 +65,11 @@
     <string name="settings_random_play_desc">从视频列表中随机选择视频播放</string>
     <string name="settings_video_display">视频显示</string>
     <string name="settings_video_aspect">画面适配</string>
-    <string name="settings_video_aspect_desc">保持视频比例，选择完整显示或填满裁切</string>
+    <string name="settings_video_aspect_desc">动态取景或保持比例显示</string>
+    <string name="video_aspect_dynamic">动态</string>
     <string name="video_aspect_fit">完整显示</string>
     <string name="video_aspect_crop">填满裁切</string>
+    <string name="settings_viewport_step">取景移动步长：%1$d%%</string>
     <string name="settings_overlay_shortcuts">悬浮窗快捷键绑定</string>
     <string name="shortcut_dot">点</string>
     <string name="shortcut_left">左</string>
@@ -138,6 +140,9 @@
     <!-- Overlay -->
     <string name="overlay_action_rotate">旋转</string>
     <string name="overlay_rotation_status">旋转：%d°</string>
+    <string name="overlay_action_viewport">取景</string>
+    <string name="overlay_viewport_dynamic_only">取景控制仅用于动态模式</string>
+    <string name="overlay_viewport_no_active">请先通过快捷键选择视频</string>
 
     <!-- Home Screen - Version Card -->
     <string name="version_current">当前版本</string>

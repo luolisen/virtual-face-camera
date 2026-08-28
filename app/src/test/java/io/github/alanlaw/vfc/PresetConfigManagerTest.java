@@ -113,6 +113,110 @@ public class PresetConfigManagerTest {
     }
 
     @Test
+    public void viewportsAreIndependentBetweenPresetsAndUnbindResetsOnlyOneSlot() {
+        ConfigManager config = configWithJson("{}");
+        ConfigManager.ShortcutPreset first = config.createPreset();
+        ConfigManager.ShortcutPreset second = config.createPreset();
+
+        assertTrue(config.bindPresetShortcut(first.getId(),
+                ConfigManager.PRESET_SHORTCUT_DOT, "first.mp4"));
+        assertTrue(config.bindPresetShortcut(second.getId(),
+                ConfigManager.PRESET_SHORTCUT_DOT, "second.mp4"));
+        assertTrue(config.selectPresetShortcut(first.getId(),
+                ConfigManager.PRESET_SHORTCUT_DOT, "first.mp4"));
+        assertTrue(config.moveActiveBindingViewport(
+                ConfigManager.VIEWPORT_DIRECTION_RIGHT, 5));
+
+        assertEquals(0.55f, config.getPresetShortcutViewport(first.getId(),
+                ConfigManager.PRESET_SHORTCUT_DOT).getAnchorU(), 0.0001f);
+        assertEquals(0.5f, config.getPresetShortcutViewport(second.getId(),
+                ConfigManager.PRESET_SHORTCUT_DOT).getAnchorU(), 0.0001f);
+
+        assertTrue(config.unbindPresetShortcut(first.getId(),
+                ConfigManager.PRESET_SHORTCUT_DOT));
+        assertEquals(0.5f, config.getPresetShortcutViewport(first.getId(),
+                ConfigManager.PRESET_SHORTCUT_DOT).getAnchorU(), 0.0001f);
+        assertEquals("second.mp4", config.getPreset(second.getId()).getVideoName(
+                ConfigManager.PRESET_SHORTCUT_DOT));
+    }
+
+    @Test
+    public void selectingCurrentPresetDoesNotChangeSelectedVideoOrActiveBinding() {
+        ConfigManager config = configWithJson("{}");
+        ConfigManager.ShortcutPreset first = config.createPreset();
+        ConfigManager.ShortcutPreset second = config.createPreset();
+        assertTrue(config.bindPresetShortcut(first.getId(),
+                ConfigManager.PRESET_SHORTCUT_DOT, "first.mp4"));
+        assertTrue(config.bindPresetShortcut(second.getId(),
+                ConfigManager.PRESET_SHORTCUT_DOT, "second.mp4"));
+        assertTrue(config.selectPresetShortcut(first.getId(),
+                ConfigManager.PRESET_SHORTCUT_DOT, "first.mp4"));
+
+        assertTrue(config.setCurrentPreset(second.getId()));
+        assertEquals("first.mp4", config.getString(ConfigManager.KEY_SELECTED_VIDEO, ""));
+        assertEquals(first.getId(), config.getActiveBinding().getPresetId());
+        assertEquals(ConfigManager.PRESET_SHORTCUT_DOT,
+                config.getActiveBinding().getShortcutKey());
+    }
+
+    @Test
+    public void rebindingActiveSlotKeepsPlaybackIdentityAndResetsOnlyItsViewport() {
+        ConfigManager config = configWithJson("{}");
+        ConfigManager.ShortcutPreset preset = config.createPreset();
+        assertTrue(config.bindPresetShortcut(preset.getId(),
+                ConfigManager.PRESET_SHORTCUT_DOT, "first.mp4"));
+        assertTrue(config.bindPresetShortcut(preset.getId(),
+                ConfigManager.PRESET_SHORTCUT_LEFT, "left.mp4"));
+        assertTrue(config.selectPresetShortcut(preset.getId(),
+                ConfigManager.PRESET_SHORTCUT_DOT, "first.mp4"));
+        assertTrue(config.moveActiveBindingViewport(
+                ConfigManager.VIEWPORT_DIRECTION_RIGHT, 5));
+
+        assertTrue(config.bindPresetShortcut(preset.getId(),
+                ConfigManager.PRESET_SHORTCUT_DOT, "replacement.mp4"));
+        assertEquals("first.mp4", config.getString(ConfigManager.KEY_SELECTED_VIDEO, ""));
+        assertEquals(preset.getId(), config.getActiveBinding().getPresetId());
+        assertEquals(ConfigManager.PRESET_SHORTCUT_DOT,
+                config.getActiveBinding().getShortcutKey());
+        assertEquals(0.5f, config.getPresetShortcutViewport(preset.getId(),
+                ConfigManager.PRESET_SHORTCUT_DOT).getAnchorU(), 0.0001f);
+        assertEquals(0.5f, config.getPresetShortcutViewport(preset.getId(),
+                ConfigManager.PRESET_SHORTCUT_LEFT).getAnchorU(), 0.0001f);
+    }
+
+    @Test
+    public void directSelectionClearsActiveBinding() {
+        ConfigManager config = configWithJson("{}");
+        ConfigManager.ShortcutPreset preset = config.createPreset();
+        assertTrue(config.bindPresetShortcut(preset.getId(),
+                ConfigManager.PRESET_SHORTCUT_DOT, "first.mp4"));
+        assertTrue(config.selectPresetShortcut(preset.getId(),
+                ConfigManager.PRESET_SHORTCUT_DOT, "first.mp4"));
+        assertTrue(config.setSelectedVideoAndClearActive("direct.mp4"));
+        assertEquals("direct.mp4", config.getString(ConfigManager.KEY_SELECTED_VIDEO, ""));
+        assertEquals(null, config.getActiveBinding());
+    }
+
+    @Test
+    public void oldPresetWithoutViewportsMigratesIdempotently() {
+        String presetId = "stable-preset-id";
+        String json = "{\"shortcut_presets\":[{"
+                + "\"id\":\"" + presetId + "\","
+                + "\"name\":\"旧预设\","
+                + "\"bindings\":{\"dot\":\"old.mp4\"}"
+                + "}]}";
+        ConfigManager config = configWithJson(json);
+
+        assertTrue(config.migrateV02Configuration());
+        ConfigManager.Viewport viewport = config.getPresetShortcutViewport(
+                presetId, ConfigManager.PRESET_SHORTCUT_DOT);
+        assertEquals(0.5f, viewport.getAnchorU(), 0.0001f);
+        assertEquals(0.5f, viewport.getAnchorV(), 0.0001f);
+        assertFalse(config.migrateV02Configuration());
+        assertEquals(1, config.listPresets().size());
+    }
+
+    @Test
     public void deletingPresetsKeepsCurrentOrSelectsFirstRemaining() {
         ConfigManager config = configWithJson("{}");
         ConfigManager.ShortcutPreset first = config.createPreset();

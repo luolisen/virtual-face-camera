@@ -34,8 +34,9 @@ public final class RenderTargetGeometry {
     }
 
     /**
-     * Keep the raw EGL target untouched while optionally swapping only the
-     * logical target used by preview aspect calculations.
+     * Keep the raw EGL target as the only rendering target. Host window
+     * geometry is retained in the result strictly for diagnostics; it must
+     * never rewrite a Camera buffer's aspect.
      */
     public static Calculation calculate(int rawTargetWidth, int rawTargetHeight,
             HostWindowGeometry.Snapshot hostGeometry, RenderTargetRole role) {
@@ -46,24 +47,12 @@ public final class RenderTargetGeometry {
                 ? HostWindowGeometry.UNKNOWN_ROTATION
                 : hostGeometry.getDisplayRotation();
 
-        boolean rawLandscape = rawTargetWidth > rawTargetHeight;
-        boolean rawPortrait = rawTargetWidth < rawTargetHeight;
-        boolean hostLandscape = hostWidth > hostHeight;
-        boolean hostPortrait = hostWidth < hostHeight;
-        boolean orientationCompensated = effectiveRole == RenderTargetRole.PREVIEW
-                && rawTargetWidth > 0
-                && rawTargetHeight > 0
-                && hostGeometry != null
-                && hostGeometry.isAvailable()
-                && hostGeometry.hasKnownOrientation()
-                && ((rawLandscape && hostPortrait) || (rawPortrait && hostLandscape));
-
+        // Do not infer Camera Surface orientation from Activity/window
+        // orientation. The host may apply its own later transform (for
+        // example, a portrait UI backed by a 1600x728 buffer).
+        boolean orientationCompensated = false;
         int logicalTargetWidth = rawTargetWidth;
         int logicalTargetHeight = rawTargetHeight;
-        if (orientationCompensated) {
-            logicalTargetWidth = rawTargetHeight;
-            logicalTargetHeight = rawTargetWidth;
-        }
 
         return new Calculation(effectiveRole,
                 rawTargetWidth, rawTargetHeight,

@@ -281,6 +281,21 @@ public class VideoProvider extends ContentProvider {
                         ? null
                         : extras.getString(IpcContract.EXTRA_VIDEO_NAME);
                 changed = selectVideo(videoName);
+            } else if (IpcContract.METHOD_SELECT_PRESET_SHORTCUT.equals(method)) {
+                String presetId = extras == null
+                        ? null
+                        : extras.getString(IpcContract.EXTRA_PRESET_ID);
+                String shortcutKey = extras == null
+                        ? null
+                        : extras.getString(IpcContract.EXTRA_SHORTCUT_KEY);
+                changed = selectPresetShortcut(presetId, shortcutKey);
+            } else if (IpcContract.METHOD_MOVE_VIEWPORT.equals(method)) {
+                String direction = extras == null
+                        ? null
+                        : extras.getString(IpcContract.EXTRA_VIEWPORT_DIRECTION);
+                changed = moveViewport(direction);
+            } else if (IpcContract.METHOD_RESET_VIEWPORT.equals(method)) {
+                changed = resetViewport();
             }
 
             if (changed) {
@@ -349,12 +364,44 @@ public class VideoProvider extends ContentProvider {
             Log.w("VideoProvider", "Rejecting invalid or unavailable video selection: " + videoName);
             return false;
         }
-        String selectedVideo = configManager.getString(ConfigManager.KEY_SELECTED_VIDEO, "");
-        if (videoName.equals(selectedVideo)) {
+        return configManager.setSelectedVideoAndClearActive(videoName);
+    }
+
+    private boolean selectPresetShortcut(String presetId, String shortcutKey) {
+        if (presetId == null || shortcutKey == null
+                || !ConfigManager.isPresetShortcutKey(shortcutKey)) {
             return false;
         }
-        configManager.setString(ConfigManager.KEY_SELECTED_VIDEO, videoName);
-        return true;
+        ConfigManager.ShortcutPreset preset = configManager.getPreset(presetId);
+        if (preset == null) {
+            return false;
+        }
+        String videoName = preset.getVideoName(shortcutKey);
+        File videoDir = new File(ConfigManager.DEFAULT_CONFIG_DIR);
+        if (!isVideoInLibrary(videoDir, videoName)) {
+            Log.w("VideoProvider", "Rejecting unavailable preset shortcut video: " + videoName);
+            return false;
+        }
+        return configManager.selectPresetShortcut(presetId, shortcutKey, videoName);
+    }
+
+    private boolean moveViewport(String direction) {
+        if (!ConfigManager.ASPECT_MODE_DYNAMIC.equals(
+                configManager.getString(ConfigManager.KEY_VIDEO_ASPECT_MODE,
+                        ConfigManager.ASPECT_MODE_DYNAMIC))) {
+            return false;
+        }
+        return configManager.moveActiveBindingViewport(
+                direction, configManager.getViewportMoveStepPercent());
+    }
+
+    private boolean resetViewport() {
+        if (!ConfigManager.ASPECT_MODE_DYNAMIC.equals(
+                configManager.getString(ConfigManager.KEY_VIDEO_ASPECT_MODE,
+                        ConfigManager.ASPECT_MODE_DYNAMIC))) {
+            return false;
+        }
+        return configManager.resetActiveBindingViewport();
     }
 
     private boolean switchVideo(boolean next) {
@@ -383,8 +430,7 @@ public class VideoProvider extends ContentProvider {
                 : (next ? (currentIndex + 1) % files.length : (currentIndex - 1 + files.length) % files.length);
 
         String newVideoName = files[newIndex].getName();
-        configManager.setString(ConfigManager.KEY_SELECTED_VIDEO, newVideoName);
-        return true;
+        return configManager.setSelectedVideoAndClearActive(newVideoName);
     }
 
     private boolean pickRandomVideo() {
@@ -400,7 +446,6 @@ public class VideoProvider extends ContentProvider {
             return false;
 
         int index = java.util.concurrent.ThreadLocalRandom.current().nextInt(files.length);
-        configManager.setString(ConfigManager.KEY_SELECTED_VIDEO, files[index].getName());
-        return true;
+        return configManager.setSelectedVideoAndClearActive(files[index].getName());
     }
 }

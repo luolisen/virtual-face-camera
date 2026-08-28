@@ -153,6 +153,18 @@ public class HookMain {
                     camera2Hook.applyYuvPreviewRenderingConfig();
                     camera2Hook.restartYuvDecoderForSourceChange();
                 }
+
+                @Override
+                public void onViewportChanged() {
+                    String mode = VideoManager.getConfig().getString(ConfigManager.KEY_INJECTION_MODE,
+                            ConfigManager.INJECTION_MODE_LSPOSED);
+                    if (ConfigManager.INJECTION_MODE_CAMSERVER.equals(mode)) {
+                        return;
+                    }
+                    // A dynamic viewport is a renderer-only update. Do not
+                    // restart MediaPlayer, Camera2 sessions, or YUV decoding.
+                    playerManager.updateViewport();
+                }
             });
             configWatcher.init(context);
         }

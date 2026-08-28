@@ -470,7 +470,7 @@ public class VideoToFrames implements Runnable {
         float dstAspect = (float) dstW / dstH;
         boolean cropMode = ConfigManager.ASPECT_MODE_CROP.equals(
                 HookMain.getConfig().getString(
-                        ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_FIT));
+                        ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_DYNAMIC));
 
         int cropW = srcW;
         int cropH = srcH;
@@ -573,7 +573,7 @@ public class VideoToFrames implements Runnable {
                 int targetHeight = canvas.getHeight();
                 boolean crop = ConfigManager.ASPECT_MODE_CROP.equals(
                         HookMain.getConfig().getString(
-                                ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_FIT));
+                                ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_DYNAMIC));
                 float scale = crop
                         ? Math.max(targetWidth / (float) bitmap.getWidth(), targetHeight / (float) bitmap.getHeight())
                         : Math.min(targetWidth / (float) bitmap.getWidth(), targetHeight / (float) bitmap.getHeight());

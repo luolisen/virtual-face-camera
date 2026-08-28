@@ -10,9 +10,10 @@ import android.view.WindowManager;
 import java.util.Objects;
 
 /**
- * Stores the latest resumed host Activity window geometry for preview aspect
- * calculations. The values are observations from the host window; no device
- * resolution or package-specific assumptions are used.
+ * Stores the latest resumed host Activity window geometry for diagnostics. The
+ * values are observations from the host window; no device resolution or
+ * package-specific assumptions are used, and they never replace raw EGL
+ * output dimensions in rendering calculations.
  */
 public final class HostWindowGeometry {
     public static final int UNKNOWN_ROTATION = -1;

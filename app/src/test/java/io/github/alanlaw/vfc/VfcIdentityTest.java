@@ -17,10 +17,10 @@ import static org.junit.Assert.assertTrue;
 
 public class VfcIdentityTest {
     @Test
-    public void releaseIdentityIsFixedAtV021() {
+    public void releaseIdentityIsFixedAtV022() {
         assertEquals("io.github.alanlaw.vfc", BuildConfig.APPLICATION_ID);
-        assertEquals("0.2.1", BuildConfig.VERSION_NAME);
-        assertEquals(3, BuildConfig.VERSION_CODE);
+        assertEquals("0.2.2", BuildConfig.VERSION_NAME);
+        assertEquals(4, BuildConfig.VERSION_CODE);
     }
 
     @Test
@@ -31,7 +31,10 @@ public class VfcIdentityTest {
             assertEquals("io.github.alanlaw.vfc.provider", IpcContract.AUTHORITY);
             assertEquals("io.github.alanlaw.vfc.ACTION_UPDATE_CONFIG", IpcContract.ACTION_UPDATE_CONFIG);
             assertEquals("select", IpcContract.METHOD_SELECT);
+            assertEquals("select_preset_shortcut", IpcContract.METHOD_SELECT_PRESET_SHORTCUT);
             assertEquals("video_name", IpcContract.EXTRA_VIDEO_NAME);
+            assertEquals("preset_id", IpcContract.EXTRA_PRESET_ID);
+            assertEquals("shortcut_key", IpcContract.EXTRA_SHORTCUT_KEY);
         }
     }
 

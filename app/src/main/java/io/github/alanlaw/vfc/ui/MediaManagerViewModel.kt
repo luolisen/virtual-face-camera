@@ -191,10 +191,11 @@ class MediaManagerViewModel(application: Application) : AndroidViewModel(applica
                     val currentSelected = configManager.getString(ConfigManager.KEY_SELECTED_VIDEO, null)
 
                     if (currentSelected == item.name) {
+                        configManager.clearActiveBinding()
                         configManager.setString(ConfigManager.KEY_SELECTED_VIDEO, "")
                         _uiState.update { it.copy(selectedVideoName = null) }
                     } else {
-                        configManager.setString(ConfigManager.KEY_SELECTED_VIDEO, item.name)
+                        configManager.setSelectedVideoAndClearActive(item.name)
                         _uiState.update { it.copy(selectedVideoName = item.name) }
                     }
                     try {
@@ -281,7 +282,7 @@ class MediaManagerViewModel(application: Application) : AndroidViewModel(applica
                         if (convertedFile != null && convertedFile.exists() && convertedFile.length() > 0) {
                             android.util.Log.d("CamSwap", "转换成功: ${convertedFile.name}, 大小: ${convertedFile.length()}")
                             // Auto-select the converted video
-                            configManager.setString(ConfigManager.KEY_SELECTED_VIDEO, convertedFile.name)
+                            configManager.setSelectedVideoAndClearActive(convertedFile.name)
                             _uiState.update { it.copy(selectedVideoName = convertedFile.name) }
                             try {
                                 context.contentResolver.notifyChange(

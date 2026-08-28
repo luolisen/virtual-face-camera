@@ -21,7 +21,10 @@ public final class MediaPlayerManager {
     private volatile long lastCamera2PlaybackStartRealtimeMs;
     private volatile int lastCamera2PlaybackDurationMs;
     private volatile int currentRotationDegrees;
-    private volatile String currentAspectMode = ConfigManager.ASPECT_MODE_FIT;
+    private volatile String currentAspectMode = ConfigManager.ASPECT_MODE_DYNAMIC;
+    private volatile ConfigManager.ActiveBinding currentActiveBinding;
+    private volatile int currentViewportMoveStepPercent =
+            ConfigManager.DEFAULT_VIEWPORT_MOVE_STEP_PERCENT;
     private volatile HostWindowGeometry.Snapshot currentHostWindowGeometry =
             HostWindowGeometry.Snapshot.unavailable();
 
@@ -383,11 +386,20 @@ public final class MediaPlayerManager {
         LogUtil.log("【CS】旋转偏移已实时应用到渲染器: " + currentRotationDegrees + "°");
     }
 
-    /** Apply a live FIT/CROP update without rebuilding a camera session. */
+    /** Apply a live aspect-mode update without rebuilding a camera session. */
     void updateAspectMode(String aspectMode) {
         currentAspectMode = normalizeAspectMode(aspectMode);
         applyRenderingConfigToAllRenderers();
         LogUtil.log("【CS】画面适配已实时应用: " + currentAspectMode);
+    }
+
+    /** Apply a live dynamic viewport update without restarting any player. */
+    void updateViewport() {
+        synchronized (mediaLock) {
+            loadRenderingConfig();
+            applyRenderingConfigToAllRenderers();
+        }
+        LogUtil.log("【CS】动态取景已实时应用到渲染器");
     }
 
     /** Apply the latest resumed host window geometry to preview renderers. */
@@ -409,7 +421,9 @@ public final class MediaPlayerManager {
         currentRotationDegrees = normalizeRotation(
                 config.getInt(ConfigManager.KEY_VIDEO_ROTATION_OFFSET, 0));
         currentAspectMode = normalizeAspectMode(
-                config.getString(ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_FIT));
+                config.getString(ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_DYNAMIC));
+        currentActiveBinding = config.getActiveBinding();
+        currentViewportMoveStepPercent = config.getViewportMoveStepPercent();
     }
 
     private static int normalizeRotation(int degrees) {
@@ -417,9 +431,13 @@ public final class MediaPlayerManager {
     }
 
     private static String normalizeAspectMode(String aspectMode) {
-        return ConfigManager.ASPECT_MODE_CROP.equals(aspectMode)
-                ? ConfigManager.ASPECT_MODE_CROP
-                : ConfigManager.ASPECT_MODE_FIT;
+        if (ConfigManager.ASPECT_MODE_FIT.equals(aspectMode)) {
+            return ConfigManager.ASPECT_MODE_FIT;
+        }
+        if (ConfigManager.ASPECT_MODE_CROP.equals(aspectMode)) {
+            return ConfigManager.ASPECT_MODE_CROP;
+        }
+        return ConfigManager.ASPECT_MODE_DYNAMIC;
     }
 
     private void applyRenderingConfigToAllRenderers() {
@@ -436,11 +454,13 @@ public final class MediaPlayerManager {
             renderer.setRotation(currentRotationDegrees);
             renderer.setAspectMode(currentAspectMode);
             renderer.setHostWindowGeometry(currentHostWindowGeometry);
+            renderer.setViewportState(currentActiveBinding, currentViewportMoveStepPercent);
         }
         if (relay != null) {
             relay.setRotation(currentRotationDegrees);
             relay.setAspectMode(currentAspectMode);
             relay.setHostWindowGeometry(currentHostWindowGeometry);
+            relay.setViewportState(currentActiveBinding, currentViewportMoveStepPercent);
         }
     }
 

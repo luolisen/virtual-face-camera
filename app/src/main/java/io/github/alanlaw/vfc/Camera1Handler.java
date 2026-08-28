@@ -444,7 +444,7 @@ public class Camera1Handler implements ICameraHandler {
 
         float scale = ConfigManager.ASPECT_MODE_CROP.equals(
                 VideoManager.getConfig().getString(
-                        ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_FIT))
+                        ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_DYNAMIC))
                                 ? Math.max(targetWidth / (float) source.getWidth(),
                                         targetHeight / (float) source.getHeight())
                                 : Math.min(targetWidth / (float) source.getWidth(),
@@ -456,7 +456,7 @@ public class Camera1Handler implements ICameraHandler {
 
         if (ConfigManager.ASPECT_MODE_CROP.equals(
                 VideoManager.getConfig().getString(
-                        ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_FIT))) {
+                        ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_DYNAMIC))) {
             int left = Math.max(0, (scaledWidth - targetWidth) / 2);
             int top = Math.max(0, (scaledHeight - targetHeight) / 2);
             android.graphics.Bitmap cropped = android.graphics.Bitmap.createBitmap(

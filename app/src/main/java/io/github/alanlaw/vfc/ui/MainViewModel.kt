@@ -32,7 +32,8 @@ data class MainUiState(
     val disableToast: Boolean = false,
     val enableRandomPlay: Boolean = false,
     val enablePhotoFake: Boolean = false,
-    val videoAspectMode: String = ConfigManager.ASPECT_MODE_FIT,
+    val videoAspectMode: String = ConfigManager.ASPECT_MODE_DYNAMIC,
+    val viewportMoveStepPercent: Int = ConfigManager.DEFAULT_VIEWPORT_MOVE_STEP_PERCENT,
     val presets: List<PresetUiState> = emptyList(),
     val currentPresetId: String? = null,
 
@@ -85,7 +86,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     enableRandomPlay = configManager.getBoolean(ConfigManager.KEY_ENABLE_RANDOM_PLAY, false),
                     enablePhotoFake = configManager.getBoolean(ConfigManager.KEY_ENABLE_PHOTO_FAKE, false),
                     videoAspectMode = configManager.getString(
-                        ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_FIT),
+                        ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_DYNAMIC),
+                    viewportMoveStepPercent = configManager.getViewportMoveStepPercent(),
                     presets = presetState.first,
                     currentPresetId = presetState.second,
                     overlayControlEnabled = configManager.getBoolean(ConfigManager.KEY_OVERLAY_CONTROL_ENABLED, false),
@@ -159,14 +161,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setVideoAspectMode(mode: String) {
-        val normalized = if (mode == ConfigManager.ASPECT_MODE_CROP) {
-            ConfigManager.ASPECT_MODE_CROP
-        } else {
-            ConfigManager.ASPECT_MODE_FIT
+        val normalized = when (mode) {
+            ConfigManager.ASPECT_MODE_FIT -> ConfigManager.ASPECT_MODE_FIT
+            ConfigManager.ASPECT_MODE_CROP -> ConfigManager.ASPECT_MODE_CROP
+            else -> ConfigManager.ASPECT_MODE_DYNAMIC
         }
         viewModelScope.launch(Dispatchers.IO) {
             configManager.setString(ConfigManager.KEY_VIDEO_ASPECT_MODE, normalized)
             _uiState.update { it.copy(videoAspectMode = normalized) }
+        }
+    }
+
+    fun setViewportMoveStepPercent(percent: Int) {
+        val normalized = percent.coerceIn(
+            ConfigManager.MIN_VIEWPORT_MOVE_STEP_PERCENT,
+            ConfigManager.MAX_VIEWPORT_MOVE_STEP_PERCENT
+        )
+        viewModelScope.launch(Dispatchers.IO) {
+            configManager.setViewportMoveStepPercent(normalized)
+            _uiState.update { it.copy(viewportMoveStepPercent = normalized) }
         }
     }
 

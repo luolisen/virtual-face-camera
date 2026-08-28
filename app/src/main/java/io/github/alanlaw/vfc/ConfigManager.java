@@ -61,6 +61,13 @@ public class ConfigManager {
     public static final String KEY_VIDEO_ASPECT_MODE = "video_aspect_mode";
     public static final String ASPECT_MODE_FIT = "fit";
     public static final String ASPECT_MODE_CROP = "crop";
+    public static final String ASPECT_MODE_DYNAMIC = "dynamic";
+    public static final String KEY_VIEWPORT_MOVE_STEP_PERCENT = "viewport_move_step_percent";
+    public static final int DEFAULT_VIEWPORT_MOVE_STEP_PERCENT = 5;
+    public static final int MIN_VIEWPORT_MOVE_STEP_PERCENT = 1;
+    public static final int MAX_VIEWPORT_MOVE_STEP_PERCENT = 20;
+    public static final String KEY_ACTIVE_BINDING_PRESET_ID = "active_binding_preset_id";
+    public static final String KEY_ACTIVE_BINDING_SHORTCUT = "active_binding_shortcut";
     public static final String KEY_ENABLE_PHOTO_FAKE = "enable_photo_fake"; // 启用拍照替换 (动态防御)
     public static final String KEY_ENABLE_WHATSAPP_CAMERA2_COMPAT = "enable_whatsapp_camera2_compat";
 
@@ -80,11 +87,18 @@ public class ConfigManager {
     public static final String PRESET_ID_FIELD = "id";
     public static final String PRESET_NAME_FIELD = "name";
     public static final String PRESET_BINDINGS_FIELD = "bindings";
+    public static final String PRESET_VIEWPORTS_FIELD = "viewports";
+    public static final String VIEWPORT_ANCHOR_U_FIELD = "anchor_u";
+    public static final String VIEWPORT_ANCHOR_V_FIELD = "anchor_v";
     public static final String PRESET_SHORTCUT_DOT = "dot";
     public static final String PRESET_SHORTCUT_LEFT = "left";
     public static final String PRESET_SHORTCUT_RIGHT = "right";
     public static final String PRESET_SHORTCUT_OPEN = "open";
     public static final String PRESET_SHORTCUT_BLINK = "blink";
+    public static final String VIEWPORT_DIRECTION_UP = "up";
+    public static final String VIEWPORT_DIRECTION_DOWN = "down";
+    public static final String VIEWPORT_DIRECTION_LEFT = "left";
+    public static final String VIEWPORT_DIRECTION_RIGHT = "right";
     private static final String[] PRESET_SHORTCUT_KEYS = {
             PRESET_SHORTCUT_DOT,
             PRESET_SHORTCUT_LEFT,
@@ -150,6 +164,75 @@ public class ConfigManager {
         public String getVideoName(String shortcutKey) {
             String value = bindings.get(shortcutKey);
             return value == null ? "" : value;
+        }
+    }
+
+    /** Immutable normalized source-space anchor for one preset shortcut. */
+    public static final class Viewport {
+        private final float anchorU;
+        private final float anchorV;
+
+        public Viewport(float anchorU, float anchorV) {
+            this.anchorU = clampUnit(anchorU, 0.5f);
+            this.anchorV = clampUnit(anchorV, 0.5f);
+        }
+
+        public float getAnchorU() {
+            return anchorU;
+        }
+
+        public float getAnchorV() {
+            return anchorV;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof Viewport)) {
+                return false;
+            }
+            Viewport that = (Viewport) other;
+            return Float.compare(anchorU, that.anchorU) == 0
+                    && Float.compare(anchorV, that.anchorV) == 0;
+        }
+
+        @Override
+        public int hashCode() {
+            return 31 * Float.floatToIntBits(anchorU) + Float.floatToIntBits(anchorV);
+        }
+    }
+
+    /** The binding currently selected by a shortcut in the floating overlay. */
+    public static final class ActiveBinding {
+        private final String presetId;
+        private final String shortcutKey;
+        private final String videoName;
+        private final Viewport viewport;
+
+        private ActiveBinding(String presetId, String shortcutKey,
+                String videoName, Viewport viewport) {
+            this.presetId = presetId;
+            this.shortcutKey = shortcutKey;
+            this.videoName = videoName;
+            this.viewport = viewport;
+        }
+
+        public String getPresetId() {
+            return presetId;
+        }
+
+        public String getShortcutKey() {
+            return shortcutKey;
+        }
+
+        public String getVideoName() {
+            return videoName;
+        }
+
+        public Viewport getViewport() {
+            return viewport;
         }
     }
 
@@ -577,6 +660,7 @@ public class ConfigManager {
                 preset.put(PRESET_ID_FIELD, presetId);
                 preset.put(PRESET_NAME_FIELD, defaultPresetName(number));
                 preset.put(PRESET_BINDINGS_FIELD, emptyPresetBindings());
+                preset.put(PRESET_VIEWPORTS_FIELD, emptyPresetViewports());
                 presets.put(preset);
                 updated.put(KEY_SHORTCUT_PRESETS, presets);
                 updated.put(KEY_NEXT_PRESET_NUMBER, number + 1);
@@ -651,6 +735,10 @@ public class ConfigManager {
                         updated.remove(KEY_CURRENT_PRESET_ID);
                     }
                 }
+                if (presetId.equals(updated.optString(KEY_ACTIVE_BINDING_PRESET_ID, ""))) {
+                    updated.remove(KEY_ACTIVE_BINDING_PRESET_ID);
+                    updated.remove(KEY_ACTIVE_BINDING_SHORTCUT);
+                }
                 updated.put(KEY_SHORTCUT_PRESETS, presets);
                 setConfigSnapshot(updated);
                 save(updated);
@@ -708,6 +796,184 @@ public class ConfigManager {
         return preset == null ? "" : preset.getVideoName(shortcutKey);
     }
 
+    /** Return one shortcut's viewport, defaulting safely to the center. */
+    public Viewport getPresetShortcutViewport(String presetId, String shortcutKey) {
+        if (presetId == null || presetId.trim().isEmpty() || !isPresetShortcutKey(shortcutKey)) {
+            return centeredViewport();
+        }
+        return getViewportFromConfig(getConfigSnapshot(), presetId, shortcutKey);
+    }
+
+    public Viewport getCurrentPresetShortcutViewport(String shortcutKey) {
+        return getPresetShortcutViewport(getString(KEY_CURRENT_PRESET_ID, ""), shortcutKey);
+    }
+
+    /**
+     * Return the active preset binding and its source-space anchor. An active
+     * binding is intentionally independent from current_preset_id.
+     */
+    public ActiveBinding getActiveBinding() {
+        JSONObject config = getConfigSnapshot();
+        String presetId = config.optString(KEY_ACTIVE_BINDING_PRESET_ID, "").trim();
+        String shortcutKey = config.optString(KEY_ACTIVE_BINDING_SHORTCUT, "").trim();
+        if (presetId.isEmpty() || !isPresetShortcutKey(shortcutKey)) {
+            return null;
+        }
+        ShortcutPreset preset = getPresetFromConfig(config, presetId);
+        if (preset == null) {
+            return null;
+        }
+        String videoName = preset.getVideoName(shortcutKey);
+        if (!isValidPresetVideoName(videoName)) {
+            return null;
+        }
+        return new ActiveBinding(presetId, shortcutKey, videoName,
+                getViewportFromConfig(config, presetId, shortcutKey));
+    }
+
+    /**
+     * Atomically select a preset shortcut and update selected_video plus the
+     * active binding identity in one config snapshot.
+     */
+    public boolean selectPresetShortcut(String presetId, String shortcutKey, String expectedVideoName) {
+        if (presetId == null || presetId.trim().isEmpty()
+                || !isPresetShortcutKey(shortcutKey)
+                || !isValidPresetVideoName(expectedVideoName)) {
+            return false;
+        }
+        synchronized (configWriteLock) {
+            JSONObject updated = copyConfig(getConfigSnapshot());
+            ShortcutPreset preset = getPresetFromConfig(updated, presetId);
+            if (preset == null || !expectedVideoName.equals(preset.getVideoName(shortcutKey))) {
+                return false;
+            }
+            boolean changed = !expectedVideoName.equals(
+                    updated.optString(KEY_SELECTED_VIDEO, ""))
+                    || !presetId.equals(updated.optString(KEY_ACTIVE_BINDING_PRESET_ID, ""))
+                    || !shortcutKey.equals(updated.optString(KEY_ACTIVE_BINDING_SHORTCUT, ""));
+            if (!changed) {
+                return false;
+            }
+            try {
+                updated.put(KEY_SELECTED_VIDEO, expectedVideoName);
+                updated.put(KEY_ACTIVE_BINDING_PRESET_ID, presetId);
+                updated.put(KEY_ACTIVE_BINDING_SHORTCUT, shortcutKey);
+                setConfigSnapshot(updated);
+                save(updated);
+                return true;
+            } catch (JSONException e) {
+                return false;
+            }
+        }
+    }
+
+    /** Set selected_video for direct/random controls and clear shortcut identity atomically. */
+    public boolean setSelectedVideoAndClearActive(String videoName) {
+        if (!isValidPresetVideoName(videoName)) {
+            return false;
+        }
+        synchronized (configWriteLock) {
+            JSONObject updated = copyConfig(getConfigSnapshot());
+            boolean changed = !videoName.equals(updated.optString(KEY_SELECTED_VIDEO, ""))
+                    || updated.has(KEY_ACTIVE_BINDING_PRESET_ID)
+                    || updated.has(KEY_ACTIVE_BINDING_SHORTCUT);
+            if (!changed) {
+                return false;
+            }
+            try {
+                updated.put(KEY_SELECTED_VIDEO, videoName);
+                updated.remove(KEY_ACTIVE_BINDING_PRESET_ID);
+                updated.remove(KEY_ACTIVE_BINDING_SHORTCUT);
+                setConfigSnapshot(updated);
+                save(updated);
+                return true;
+            } catch (JSONException e) {
+                return false;
+            }
+        }
+    }
+
+    public boolean clearActiveBinding() {
+        synchronized (configWriteLock) {
+            JSONObject updated = copyConfig(getConfigSnapshot());
+            if (!updated.has(KEY_ACTIVE_BINDING_PRESET_ID)
+                    && !updated.has(KEY_ACTIVE_BINDING_SHORTCUT)) {
+                return false;
+            }
+            updated.remove(KEY_ACTIVE_BINDING_PRESET_ID);
+            updated.remove(KEY_ACTIVE_BINDING_SHORTCUT);
+            setConfigSnapshot(updated);
+            save(updated);
+            return true;
+        }
+    }
+
+    /** Return the configured joystick step constrained to the product range. */
+    public int getViewportMoveStepPercent() {
+        return clamp(getInt(KEY_VIEWPORT_MOVE_STEP_PERCENT,
+                DEFAULT_VIEWPORT_MOVE_STEP_PERCENT),
+                MIN_VIEWPORT_MOVE_STEP_PERCENT, MAX_VIEWPORT_MOVE_STEP_PERCENT);
+    }
+
+    public void setViewportMoveStepPercent(int percent) {
+        setInt(KEY_VIEWPORT_MOVE_STEP_PERCENT,
+                clamp(percent, MIN_VIEWPORT_MOVE_STEP_PERCENT, MAX_VIEWPORT_MOVE_STEP_PERCENT));
+    }
+
+    /**
+     * Move the active binding in logical sensor space, then persist the
+     * corresponding decoded-source anchor. Rendering performs the final
+     * target-aspect clamp for each actual output surface.
+     */
+    public boolean moveActiveBindingViewport(String direction, int stepPercent) {
+        if (!isViewportDirection(direction)) {
+            return false;
+        }
+        int step = clamp(stepPercent, MIN_VIEWPORT_MOVE_STEP_PERCENT,
+                MAX_VIEWPORT_MOVE_STEP_PERCENT);
+        synchronized (configWriteLock) {
+            JSONObject updated = copyConfig(getConfigSnapshot());
+            if (!ASPECT_MODE_DYNAMIC.equals(updated.optString(KEY_VIDEO_ASPECT_MODE,
+                    ASPECT_MODE_DYNAMIC))) {
+                return false;
+            }
+            String presetId = updated.optString(KEY_ACTIVE_BINDING_PRESET_ID, "").trim();
+            String shortcutKey = updated.optString(KEY_ACTIVE_BINDING_SHORTCUT, "").trim();
+            if (presetId.isEmpty() || !isPresetShortcutKey(shortcutKey)) {
+                return false;
+            }
+            ShortcutPreset preset = getPresetFromConfig(updated, presetId);
+            if (preset == null || preset.getVideoName(shortcutKey).isEmpty()) {
+                return false;
+            }
+            Viewport viewport = getViewportFromConfig(updated, presetId, shortcutKey);
+            int rotation = normalizeRotation(updated.optInt(KEY_VIDEO_ROTATION_OFFSET, 0));
+            float[] logical = VirtualSensorTransform.sourceToLogical(
+                    viewport.getAnchorU(), viewport.getAnchorV(), rotation);
+            logical = VirtualSensorTransform.moveLogical(logical[0], logical[1], direction, step);
+            float[] source = VirtualSensorTransform.logicalToSource(
+                    logical[0], logical[1], rotation);
+            return updateViewportInSnapshot(updated, presetId, shortcutKey,
+                    new Viewport(source[0], source[1]));
+        }
+    }
+
+    public boolean resetActiveBindingViewport() {
+        synchronized (configWriteLock) {
+            JSONObject updated = copyConfig(getConfigSnapshot());
+            if (!ASPECT_MODE_DYNAMIC.equals(updated.optString(KEY_VIDEO_ASPECT_MODE,
+                    ASPECT_MODE_DYNAMIC))) {
+                return false;
+            }
+            String presetId = updated.optString(KEY_ACTIVE_BINDING_PRESET_ID, "").trim();
+            String shortcutKey = updated.optString(KEY_ACTIVE_BINDING_SHORTCUT, "").trim();
+            if (presetId.isEmpty() || !isPresetShortcutKey(shortcutKey)) {
+                return false;
+            }
+            return updateViewportInSnapshot(updated, presetId, shortcutKey, centeredViewport());
+        }
+    }
+
     /**
      * Migrate the v0.1 global five-key bindings exactly once. An existing
      * shortcut_presets key, including an empty array, is authoritative.
@@ -749,6 +1015,7 @@ public class ConfigManager {
                     bindings.put(PRESET_SHORTCUT_KEYS[i], value);
                 }
                 preset.put(PRESET_BINDINGS_FIELD, bindings);
+                preset.put(PRESET_VIEWPORTS_FIELD, emptyPresetViewports());
                 JSONArray presets = new JSONArray();
                 presets.put(preset);
                 updated.put(KEY_SHORTCUT_PRESETS, presets);
@@ -811,7 +1078,15 @@ public class ConfigManager {
         boolean presetMigrated = migrateLegacyShortcutBindingsIfNeeded();
         boolean audioChanged = enforceAudioFeaturesDisabled();
         boolean notificationChanged = enforceNotificationControlDisabled();
-        return presetMigrated || audioChanged || notificationChanged;
+        boolean viewportMigrated = migratePresetViewportsIfNeeded();
+        boolean aspectMigrated = normalizeAspectModeForV022();
+        boolean stepMigrated = getInt(KEY_VIEWPORT_MOVE_STEP_PERCENT,
+                DEFAULT_VIEWPORT_MOVE_STEP_PERCENT) != getViewportMoveStepPercent();
+        if (stepMigrated) {
+            setViewportMoveStepPercent(getViewportMoveStepPercent());
+        }
+        return presetMigrated || audioChanged || notificationChanged
+                || viewportMigrated || aspectMigrated || stepMigrated;
     }
 
     private boolean updatePresetBinding(String presetId, String shortcutKey, String videoName) {
@@ -827,12 +1102,21 @@ public class ConfigManager {
             if (preset == null || bindings == null) {
                 return false;
             }
-            if (videoName.equals(bindings.optString(shortcutKey, ""))) {
-                return true;
-            }
             try {
+                boolean bindingChanged = !videoName.equals(bindings.optString(shortcutKey, ""));
                 bindings.put(shortcutKey, videoName);
                 preset.put(PRESET_BINDINGS_FIELD, bindings);
+                JSONObject viewports = ensurePresetViewports(preset);
+                Viewport oldViewport = getViewportFromConfig(updated, presetId, shortcutKey);
+                boolean viewportChanged = !centeredViewport().equals(oldViewport);
+                viewports.put(shortcutKey, viewportJson(centeredViewport()));
+                preset.put(PRESET_VIEWPORTS_FIELD, viewports);
+                // Rebinding is intentionally independent from playback state.
+                // The selected video and active binding identity must remain
+                // untouched until the user explicitly selects another slot.
+                if (!bindingChanged && !viewportChanged) {
+                    return true;
+                }
                 presets.put(index, preset);
                 updated.put(KEY_SHORTCUT_PRESETS, presets);
                 setConfigSnapshot(updated);
@@ -885,6 +1169,191 @@ public class ConfigManager {
             bindings.put(shortcutKey, "");
         }
         return bindings;
+    }
+
+    private static JSONObject emptyPresetViewports() throws JSONException {
+        JSONObject viewports = new JSONObject();
+        for (String shortcutKey : PRESET_SHORTCUT_KEYS) {
+            viewports.put(shortcutKey, viewportJson(centeredViewport()));
+        }
+        return viewports;
+    }
+
+    private static JSONObject ensurePresetViewports(JSONObject preset) throws JSONException {
+        JSONObject existing = preset == null
+                ? null : preset.optJSONObject(PRESET_VIEWPORTS_FIELD);
+        JSONObject viewports = existing == null ? new JSONObject() : existing;
+        for (String shortcutKey : PRESET_SHORTCUT_KEYS) {
+            JSONObject viewport = viewports.optJSONObject(shortcutKey);
+            if (viewport == null) {
+                viewports.put(shortcutKey, viewportJson(centeredViewport()));
+            }
+        }
+        return viewports;
+    }
+
+    private static JSONObject viewportJson(Viewport viewport) throws JSONException {
+        JSONObject value = new JSONObject();
+        value.put(VIEWPORT_ANCHOR_U_FIELD, viewport.getAnchorU());
+        value.put(VIEWPORT_ANCHOR_V_FIELD, viewport.getAnchorV());
+        return value;
+    }
+
+    private static Viewport centeredViewport() {
+        return new Viewport(0.5f, 0.5f);
+    }
+
+    private static float clampUnit(float value, float fallback) {
+        if (Float.isNaN(value) || Float.isInfinite(value)) {
+            return fallback;
+        }
+        return Math.max(0.0f, Math.min(1.0f, value));
+    }
+
+    private static float clamp(float value, float min, float max) {
+        if (Float.isNaN(value) || Float.isInfinite(value)) {
+            return min;
+        }
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private static int normalizeRotation(int degrees) {
+        return ((degrees % 360) + 360) % 360;
+    }
+
+    private static boolean isViewportDirection(String direction) {
+        return VIEWPORT_DIRECTION_UP.equals(direction)
+                || VIEWPORT_DIRECTION_DOWN.equals(direction)
+                || VIEWPORT_DIRECTION_LEFT.equals(direction)
+                || VIEWPORT_DIRECTION_RIGHT.equals(direction);
+    }
+
+    private static Viewport getViewportFromConfig(JSONObject config, String presetId,
+            String shortcutKey) {
+        ShortcutPreset preset = getPresetFromConfig(config, presetId);
+        if (preset == null || !isPresetShortcutKey(shortcutKey)) {
+            return centeredViewport();
+        }
+        JSONArray presets = config == null ? null : config.optJSONArray(KEY_SHORTCUT_PRESETS);
+        int index = getPresetIndex(presets, presetId);
+        JSONObject rawPreset = presets == null ? null : presets.optJSONObject(index);
+        JSONObject viewports = rawPreset == null
+                ? null : rawPreset.optJSONObject(PRESET_VIEWPORTS_FIELD);
+        JSONObject rawViewport = viewports == null ? null : viewports.optJSONObject(shortcutKey);
+        if (rawViewport == null) {
+            return centeredViewport();
+        }
+        return new Viewport(
+                (float) rawViewport.optDouble(VIEWPORT_ANCHOR_U_FIELD, 0.5d),
+                (float) rawViewport.optDouble(VIEWPORT_ANCHOR_V_FIELD, 0.5d));
+    }
+
+    private static ShortcutPreset getPresetFromConfig(JSONObject config, String presetId) {
+        if (config == null || presetId == null || presetId.trim().isEmpty()) {
+            return null;
+        }
+        JSONArray presets = config.optJSONArray(KEY_SHORTCUT_PRESETS);
+        int index = getPresetIndex(presets, presetId);
+        JSONObject preset = presets == null ? null : presets.optJSONObject(index);
+        return parsePreset(preset);
+    }
+
+    private boolean updateViewportInSnapshot(JSONObject updated, String presetId,
+            String shortcutKey, Viewport viewport) {
+        JSONArray presets = updated.optJSONArray(KEY_SHORTCUT_PRESETS);
+        int index = getPresetIndex(presets, presetId);
+        JSONObject preset = presets == null ? null : presets.optJSONObject(index);
+        if (preset == null || !isPresetShortcutKey(shortcutKey)) {
+            return false;
+        }
+        try {
+            JSONObject viewports = ensurePresetViewports(preset);
+            JSONObject old = viewports.optJSONObject(shortcutKey);
+            Viewport safeViewport = viewport == null ? centeredViewport() : viewport;
+            Viewport oldViewport = old == null ? centeredViewport() : new Viewport(
+                    (float) old.optDouble(VIEWPORT_ANCHOR_U_FIELD, 0.5d),
+                    (float) old.optDouble(VIEWPORT_ANCHOR_V_FIELD, 0.5d));
+            if (oldViewport.equals(safeViewport)) {
+                return false;
+            }
+            viewports.put(shortcutKey, viewportJson(safeViewport));
+            preset.put(PRESET_VIEWPORTS_FIELD, viewports);
+            presets.put(index, preset);
+            updated.put(KEY_SHORTCUT_PRESETS, presets);
+            setConfigSnapshot(updated);
+            save(updated);
+            return true;
+        } catch (JSONException e) {
+            return false;
+        }
+    }
+
+    /** Add centered viewport objects to old presets without changing bindings. */
+    private boolean migratePresetViewportsIfNeeded() {
+        synchronized (configWriteLock) {
+            JSONObject current = getConfigSnapshot();
+            JSONArray currentPresets = current.optJSONArray(KEY_SHORTCUT_PRESETS);
+            if (currentPresets == null || currentPresets.length() == 0) {
+                return false;
+            }
+            JSONObject updated = copyConfig(current);
+            JSONArray presets = updated.optJSONArray(KEY_SHORTCUT_PRESETS);
+            boolean changed = false;
+            try {
+                for (int i = 0; i < presets.length(); i++) {
+                    JSONObject preset = presets.optJSONObject(i);
+                    if (preset == null) {
+                        continue;
+                    }
+                    JSONObject viewports = preset.optJSONObject(PRESET_VIEWPORTS_FIELD);
+                    if (viewports == null) {
+                        preset.put(PRESET_VIEWPORTS_FIELD, emptyPresetViewports());
+                        changed = true;
+                        continue;
+                    }
+                    for (String shortcutKey : PRESET_SHORTCUT_KEYS) {
+                        if (viewports.optJSONObject(shortcutKey) == null) {
+                            viewports.put(shortcutKey, viewportJson(centeredViewport()));
+                            changed = true;
+                        }
+                    }
+                }
+                if (!changed) {
+                    return false;
+                }
+                updated.put(KEY_SHORTCUT_PRESETS, presets);
+                setConfigSnapshot(updated);
+                save(updated);
+                return true;
+            } catch (JSONException e) {
+                return false;
+            }
+        }
+    }
+
+    /** New installations use Dynamic; valid legacy FIT/CROP values remain unchanged. */
+    private boolean normalizeAspectModeForV022() {
+        synchronized (configWriteLock) {
+            JSONObject current = getConfigSnapshot();
+            String existing = current.optString(KEY_VIDEO_ASPECT_MODE, "");
+            if (ASPECT_MODE_FIT.equals(existing) || ASPECT_MODE_CROP.equals(existing)
+                    || ASPECT_MODE_DYNAMIC.equals(existing)) {
+                return false;
+            }
+            JSONObject updated = copyConfig(current);
+            try {
+                updated.put(KEY_VIDEO_ASPECT_MODE, ASPECT_MODE_DYNAMIC);
+                setConfigSnapshot(updated);
+                save(updated);
+                return true;
+            } catch (JSONException e) {
+                return false;
+            }
+        }
     }
 
     private static int getPresetIndex(JSONArray presets, String presetId) {

@@ -26,7 +26,13 @@ public final class IpcContract {
     public static final String METHOD_PREV = "prev";
     public static final String METHOD_RANDOM = "random";
     public static final String METHOD_SELECT = "select";
+    public static final String METHOD_SELECT_PRESET_SHORTCUT = "select_preset_shortcut";
+    public static final String METHOD_MOVE_VIEWPORT = "move_viewport";
+    public static final String METHOD_RESET_VIEWPORT = "reset_viewport";
     public static final String EXTRA_VIDEO_NAME = "video_name";
+    public static final String EXTRA_PRESET_ID = "preset_id";
+    public static final String EXTRA_SHORTCUT_KEY = "shortcut_key";
+    public static final String EXTRA_VIEWPORT_DIRECTION = "viewport_direction";
 
     private IpcContract() {
     }

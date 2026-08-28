@@ -4,7 +4,6 @@ import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
 
 public class RenderTargetGeometryTest {
     private static final HostWindowGeometry.Snapshot PORTRAIT_HOST =
@@ -13,13 +12,13 @@ public class RenderTargetGeometryTest {
             new HostWindowGeometry.Snapshot(2376, 1080, 1);
 
     @Test
-    public void previewLandscapeBufferUsesPortraitLogicalTarget() {
+    public void previewLandscapeBufferAlwaysUsesRawTargetEvenForPortraitHost() {
         RenderTargetGeometry.Calculation result = RenderTargetGeometry.calculate(
                 1600, 728, PORTRAIT_HOST, RenderTargetRole.PREVIEW);
 
-        assertEquals(728, result.logicalTargetWidth);
-        assertEquals(1600, result.logicalTargetHeight);
-        assertTrue(result.orientationCompensated);
+        assertEquals(1600, result.logicalTargetWidth);
+        assertEquals(728, result.logicalTargetHeight);
+        assertFalse(result.orientationCompensated);
     }
 
     @Test

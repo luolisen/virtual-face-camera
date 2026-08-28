@@ -51,8 +51,10 @@
     <string name="settings_video_display">Video Display</string>
     <string name="settings_video_aspect">Aspect Mode</string>
     <string name="settings_video_aspect_desc">Keep the source ratio with fit or crop output</string>
+    <string name="video_aspect_dynamic">Dynamic</string>
     <string name="video_aspect_fit">Fit</string>
     <string name="video_aspect_crop">Crop</string>
+    <string name="settings_viewport_step">Viewport step: %1$d%%</string>
     <string name="settings_overlay_shortcuts">Overlay Shortcut Bindings</string>
     <string name="shortcut_dot">Dot</string>
     <string name="shortcut_left">Left</string>
@@ -120,6 +122,9 @@
     <!-- Overlay -->
     <string name="overlay_action_rotate">Rotate</string>
     <string name="overlay_rotation_status">Rotation: %d°</string>
+    <string name="overlay_action_viewport">Viewport</string>
+    <string name="overlay_viewport_dynamic_only">Viewport controls are only available in Dynamic mode</string>
+    <string name="overlay_viewport_no_active">Select a video with a shortcut first</string>
 
     <!-- Home Screen - Version Card -->
     <string name="version_current">Current Version</string>

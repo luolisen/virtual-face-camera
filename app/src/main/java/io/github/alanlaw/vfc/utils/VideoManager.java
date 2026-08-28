@@ -425,7 +425,7 @@ public class VideoManager {
         if (files != null && files.length > 0) {
             int index = ThreadLocalRandom.current().nextInt(files.length);
             File selectedFile = files[index];
-            config.setString(ConfigManager.KEY_SELECTED_VIDEO, selectedFile.getName());
+            config.setSelectedVideoAndClearActive(selectedFile.getName());
             log("【CS】[Random] 选择了: " + selectedFile.getName());
         } else {
             log("【CS】[Random] 无可用视频文件");
@@ -512,7 +512,7 @@ public class VideoManager {
             File targetFile = new File(dir, targetFileName);
 
             if (targetFile.exists()) {
-                config.setString(ConfigManager.KEY_SELECTED_VIDEO, targetFileName);
+                config.setSelectedVideoAndClearActive(targetFileName);
                 current_video_path = targetFile.getAbsolutePath();
                 log("【CS】Selected: " + targetFileName);
                 return true;

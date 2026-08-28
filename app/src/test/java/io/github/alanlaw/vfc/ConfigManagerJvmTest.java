@@ -61,4 +61,19 @@ public class ConfigManagerJvmTest {
             assertEquals("", configManager.getShortcutVideo(ConfigManager.KEY_SHORTCUT_RIGHT_VIDEO));
         }
     }
+
+    @Test
+    public void v022MigrationDefaultsMissingAspectModeToDynamic() {
+        try (MockedStatic<Log> logMock = Mockito.mockStatic(Log.class)) {
+            logMock.when(() -> Log.i(Mockito.anyString(), Mockito.anyString())).thenReturn(0);
+
+            ConfigManager configManager = new ConfigManager(false);
+            configManager.setSkipProviderReload(true);
+            configManager.updateConfigFromJSON("{}");
+
+            assertTrue(configManager.migrateV02Configuration());
+            assertEquals(ConfigManager.ASPECT_MODE_DYNAMIC,
+                    configManager.getString(ConfigManager.KEY_VIDEO_ASPECT_MODE, ""));
+        }
+    }
 }

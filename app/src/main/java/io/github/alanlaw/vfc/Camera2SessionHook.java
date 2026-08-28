@@ -1629,7 +1629,7 @@ public final class Camera2SessionHook {
         float dstAspect = dstW / (float) dstH;
         boolean crop = ConfigManager.ASPECT_MODE_CROP.equals(
                 VideoManager.getConfig().getString(
-                        ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_FIT));
+                        ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_DYNAMIC));
 
         int cropW = srcW;
         int cropH = srcH;
@@ -2224,7 +2224,7 @@ public final class Camera2SessionHook {
         float targetAspect = (float) targetWidth / (float) targetHeight;
 
         String aspectMode = VideoManager.getConfig().getString(
-                ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_FIT);
+                ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_DYNAMIC);
         if (!ConfigManager.ASPECT_MODE_CROP.equals(aspectMode)) {
             float scale = Math.min(targetWidth / (float) sourceWidth, targetHeight / (float) sourceHeight);
             int scaledWidth = Math.max(1, Math.round(sourceWidth * scale));
