@@ -90,6 +90,11 @@ public class ConfigManager {
     public static final String PRESET_VIEWPORTS_FIELD = "viewports";
     public static final String VIEWPORT_ANCHOR_U_FIELD = "anchor_u";
     public static final String VIEWPORT_ANCHOR_V_FIELD = "anchor_v";
+    public static final String VIEWPORT_ZOOM_FIELD = "zoom";
+    public static final float DEFAULT_VIEWPORT_ZOOM = 1.0f;
+    public static final float MIN_VIEWPORT_ZOOM = 1.0f;
+    public static final float MAX_VIEWPORT_ZOOM = 4.0f;
+    public static final float VIEWPORT_ZOOM_FACTOR = 1.10f;
     public static final String PRESET_SHORTCUT_DOT = "dot";
     public static final String PRESET_SHORTCUT_LEFT = "left";
     public static final String PRESET_SHORTCUT_RIGHT = "right";
@@ -171,10 +176,16 @@ public class ConfigManager {
     public static final class Viewport {
         private final float anchorU;
         private final float anchorV;
+        private final float zoom;
 
         public Viewport(float anchorU, float anchorV) {
+            this(anchorU, anchorV, DEFAULT_VIEWPORT_ZOOM);
+        }
+
+        public Viewport(float anchorU, float anchorV, float zoom) {
             this.anchorU = clampUnit(anchorU, 0.5f);
             this.anchorV = clampUnit(anchorV, 0.5f);
+            this.zoom = clamp(zoom, MIN_VIEWPORT_ZOOM, MAX_VIEWPORT_ZOOM);
         }
 
         public float getAnchorU() {
@@ -183,6 +194,10 @@ public class ConfigManager {
 
         public float getAnchorV() {
             return anchorV;
+        }
+
+        public float getZoom() {
+            return zoom;
         }
 
         @Override
@@ -195,12 +210,14 @@ public class ConfigManager {
             }
             Viewport that = (Viewport) other;
             return Float.compare(anchorU, that.anchorU) == 0
-                    && Float.compare(anchorV, that.anchorV) == 0;
+                    && Float.compare(anchorV, that.anchorV) == 0
+                    && Float.compare(zoom, that.zoom) == 0;
         }
 
         @Override
         public int hashCode() {
-            return 31 * Float.floatToIntBits(anchorU) + Float.floatToIntBits(anchorV);
+            int result = 31 * Float.floatToIntBits(anchorU) + Float.floatToIntBits(anchorV);
+            return 31 * result + Float.floatToIntBits(zoom);
         }
     }
 
@@ -954,7 +971,7 @@ public class ConfigManager {
             float[] source = VirtualSensorTransform.logicalToSource(
                     logical[0], logical[1], rotation);
             return updateViewportInSnapshot(updated, presetId, shortcutKey,
-                    new Viewport(source[0], source[1]));
+                    new Viewport(source[0], source[1], viewport.getZoom()));
         }
     }
 
@@ -971,6 +988,24 @@ public class ConfigManager {
                 return false;
             }
             return updateViewportInSnapshot(updated, presetId, shortcutKey, centeredViewport());
+        }
+    }
+
+    /**
+     * Persist a viewport calculated by the target camera process. The caller
+     * supplies the already clamped value so the provider remains the single
+     * atomic writer for the active preset/shortcut binding.
+     */
+    public boolean setActiveBindingViewport(Viewport viewport) {
+        synchronized (configWriteLock) {
+            JSONObject updated = copyConfig(getConfigSnapshot());
+            String presetId = updated.optString(KEY_ACTIVE_BINDING_PRESET_ID, "").trim();
+            String shortcutKey = updated.optString(KEY_ACTIVE_BINDING_SHORTCUT, "").trim();
+            if (presetId.isEmpty() || !isPresetShortcutKey(shortcutKey)) {
+                return false;
+            }
+            return updateViewportInSnapshot(updated, presetId, shortcutKey,
+                    viewport == null ? centeredViewport() : viewport);
         }
     }
 
@@ -1196,6 +1231,7 @@ public class ConfigManager {
         JSONObject value = new JSONObject();
         value.put(VIEWPORT_ANCHOR_U_FIELD, viewport.getAnchorU());
         value.put(VIEWPORT_ANCHOR_V_FIELD, viewport.getAnchorV());
+        value.put(VIEWPORT_ZOOM_FIELD, viewport.getZoom());
         return value;
     }
 
@@ -1249,7 +1285,8 @@ public class ConfigManager {
         }
         return new Viewport(
                 (float) rawViewport.optDouble(VIEWPORT_ANCHOR_U_FIELD, 0.5d),
-                (float) rawViewport.optDouble(VIEWPORT_ANCHOR_V_FIELD, 0.5d));
+                (float) rawViewport.optDouble(VIEWPORT_ANCHOR_V_FIELD, 0.5d),
+                (float) rawViewport.optDouble(VIEWPORT_ZOOM_FIELD, DEFAULT_VIEWPORT_ZOOM));
     }
 
     private static ShortcutPreset getPresetFromConfig(JSONObject config, String presetId) {
@@ -1276,7 +1313,8 @@ public class ConfigManager {
             Viewport safeViewport = viewport == null ? centeredViewport() : viewport;
             Viewport oldViewport = old == null ? centeredViewport() : new Viewport(
                     (float) old.optDouble(VIEWPORT_ANCHOR_U_FIELD, 0.5d),
-                    (float) old.optDouble(VIEWPORT_ANCHOR_V_FIELD, 0.5d));
+                    (float) old.optDouble(VIEWPORT_ANCHOR_V_FIELD, 0.5d),
+                    (float) old.optDouble(VIEWPORT_ZOOM_FIELD, DEFAULT_VIEWPORT_ZOOM));
             if (oldViewport.equals(safeViewport)) {
                 return false;
             }
@@ -1316,8 +1354,12 @@ public class ConfigManager {
                         continue;
                     }
                     for (String shortcutKey : PRESET_SHORTCUT_KEYS) {
-                        if (viewports.optJSONObject(shortcutKey) == null) {
+                        JSONObject viewport = viewports.optJSONObject(shortcutKey);
+                        if (viewport == null) {
                             viewports.put(shortcutKey, viewportJson(centeredViewport()));
+                            changed = true;
+                        } else if (!viewport.has(VIEWPORT_ZOOM_FIELD)) {
+                            viewport.put(VIEWPORT_ZOOM_FIELD, DEFAULT_VIEWPORT_ZOOM);
                             changed = true;
                         }
                     }

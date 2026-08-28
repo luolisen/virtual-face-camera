@@ -32,6 +32,8 @@ import android.widget.PopupWindow;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import java.util.Locale;
+
 public class OverlayControlService extends Service {
     private static final int EDGE_MARGIN_DP = 12;
     private static final float SCALE_FACTOR = 0.8f;
@@ -46,6 +48,7 @@ public class OverlayControlService extends Service {
     private TextView presetButton;
     private TextView rotationButton;
     private TextView viewportButton;
+    private TextView viewportZoomLabel;
     private PopupWindow presetPopup;
     private PopupWindow viewportPopup;
     private WindowManager.LayoutParams layoutParams;
@@ -266,6 +269,7 @@ public class OverlayControlService extends Service {
         presetButton = null;
         rotationButton = null;
         viewportButton = null;
+        viewportZoomLabel = null;
         for (int i = 0; i < shortcutButtons.length; i++) {
             shortcutButtons[i] = null;
         }
@@ -397,7 +401,7 @@ public class OverlayControlService extends Service {
 
         LinearLayout middleRow = makeViewportRow();
         middleRow.addView(makeViewportControl("←", ConfigManager.VIEWPORT_DIRECTION_LEFT));
-        middleRow.addView(makeViewportControl("中", null));
+        middleRow.addView(makeViewportControl("◎", null));
         middleRow.addView(makeViewportControl("→", ConfigManager.VIEWPORT_DIRECTION_RIGHT));
         controls.addView(middleRow);
 
@@ -405,7 +409,25 @@ public class OverlayControlService extends Service {
         downRow.addView(makeViewportControl("↓", ConfigManager.VIEWPORT_DIRECTION_DOWN));
         controls.addView(downRow);
 
-        viewportPopup = new PopupWindow(controls, dp(174), dp(174), true);
+        LinearLayout zoomRow = makeViewportRow();
+        zoomRow.addView(makeViewportControl("−", null, false));
+        TextView zoomLabel = new TextView(this);
+        ConfigManager.ActiveBinding activeBinding = configManager.getActiveBinding();
+        float zoom = activeBinding == null || activeBinding.getViewport() == null
+                ? ConfigManager.DEFAULT_VIEWPORT_ZOOM
+                : activeBinding.getViewport().getZoom();
+        zoomLabel.setText(String.format(Locale.US, "%.2f×", zoom));
+        zoomLabel.setTextColor(resolvePanelTextColor());
+        zoomLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
+        zoomLabel.setGravity(Gravity.CENTER);
+        zoomLabel.setSingleLine(true);
+        zoomLabel.setLayoutParams(new LinearLayout.LayoutParams(dp(66), dp(40)));
+        viewportZoomLabel = zoomLabel;
+        zoomRow.addView(zoomLabel);
+        zoomRow.addView(makeViewportControl("+", null, true));
+        controls.addView(zoomRow);
+
+        viewportPopup = new PopupWindow(controls, dp(174), dp(224), true);
         viewportPopup.setBackgroundDrawable(new ColorDrawable(resolvePanelColor()));
         viewportPopup.setOutsideTouchable(true);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -428,34 +450,37 @@ public class OverlayControlService extends Service {
     }
 
     private TextView makeViewportControl(String text, String direction) {
+        return makeViewportControl(text, direction, null);
+    }
+
+    private TextView makeViewportControl(String text, String direction, Boolean zoomIn) {
         TextView button = makeActionButton(text, resolveMonetColor(0xFF4F6475),
-                v -> handleViewport(direction));
+                v -> {
+                    if (zoomIn != null) {
+                        handleZoom(zoomIn);
+                    } else {
+                        handleViewport(direction);
+                    }
+                });
         button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f);
         button.setLayoutParams(new LinearLayout.LayoutParams(dp(44), dp(40)));
         return button;
     }
 
+    private void handleZoom(boolean zoomIn) {
+        if (!ensureViewportControlsAvailable()) {
+            return;
+        }
+        boolean changed = zoomIn
+                ? ControlActionHelper.zoomInViewport(this)
+                : ControlActionHelper.zoomOutViewport(this);
+        if (!changed && !ControlActionHelper.hasActiveCamera(this)) {
+            showViewportToast(getString(R.string.overlay_viewport_no_camera));
+        }
+    }
+
     private void handleViewport(String direction) {
-        if (configManager == null) {
-            return;
-        }
-        configManager.forceReload();
-        String aspectMode = configManager.getString(
-                ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_DYNAMIC);
-        if (!ConfigManager.ASPECT_MODE_DYNAMIC.equals(aspectMode)) {
-            android.widget.Toast.makeText(
-                    this,
-                    getString(R.string.overlay_viewport_dynamic_only),
-                    android.widget.Toast.LENGTH_SHORT).show();
-            dismissViewportPopup();
-            return;
-        }
-        if (configManager.getActiveBinding() == null) {
-            android.widget.Toast.makeText(
-                    this,
-                    getString(R.string.overlay_viewport_no_active),
-                    android.widget.Toast.LENGTH_SHORT).show();
-            dismissViewportPopup();
+        if (!ensureViewportControlsAvailable()) {
             return;
         }
         boolean changed = direction == null
@@ -463,7 +488,34 @@ public class OverlayControlService extends Service {
                 : ControlActionHelper.moveViewport(this, direction);
         if (changed) {
             refreshShortcutButtonStates();
+        } else if (!ControlActionHelper.hasActiveCamera(this)) {
+            showViewportToast(getString(R.string.overlay_viewport_no_camera));
         }
+    }
+
+    private boolean ensureViewportControlsAvailable() {
+        if (configManager == null) {
+            return false;
+        }
+        configManager.forceReload();
+        String aspectMode = configManager.getString(
+                ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_DYNAMIC);
+        if (!ConfigManager.ASPECT_MODE_DYNAMIC.equals(aspectMode)) {
+            showViewportToast(getString(R.string.overlay_viewport_dynamic_only));
+            dismissViewportPopup();
+            return false;
+        }
+        if (configManager.getActiveBinding() == null) {
+            showViewportToast(getString(R.string.overlay_viewport_no_active));
+            dismissViewportPopup();
+            return false;
+        }
+        return true;
+    }
+
+    private void showViewportToast(String message) {
+        android.widget.Toast.makeText(this, message,
+                android.widget.Toast.LENGTH_SHORT).show();
     }
 
     private void refreshShortcutButtonStates() {
@@ -472,6 +524,13 @@ public class OverlayControlService extends Service {
         }
         configManager.forceReload();
         String selectedVideo = configManager.getString(ConfigManager.KEY_SELECTED_VIDEO, "");
+        if (viewportZoomLabel != null) {
+            ConfigManager.ActiveBinding activeBinding = configManager.getActiveBinding();
+            float zoom = activeBinding == null || activeBinding.getViewport() == null
+                    ? ConfigManager.DEFAULT_VIEWPORT_ZOOM
+                    : activeBinding.getViewport().getZoom();
+            viewportZoomLabel.setText(String.format(Locale.US, "%.2f×", zoom));
+        }
         for (int i = 0; i < shortcutButtons.length; i++) {
             TextView button = shortcutButtons[i];
             if (button == null) {
@@ -609,6 +668,7 @@ public class OverlayControlService extends Service {
             }
             viewportPopup = null;
         }
+        viewportZoomLabel = null;
     }
 
     private GradientDrawable makePanelBackground() {

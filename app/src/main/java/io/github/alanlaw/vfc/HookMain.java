@@ -125,6 +125,7 @@ public class HookMain {
     // =====================================================================
 
     private static ConfigWatcher configWatcher;
+    private static volatile long lastViewportCommandSequence;
 
     private static void initContentObserver(final Context context) {
         if (configWatcher == null) {
@@ -165,8 +166,102 @@ public class HookMain {
                     // restart MediaPlayer, Camera2 sessions, or YUV decoding.
                     playerManager.updateViewport();
                 }
+
+                @Override
+                public void onViewportCommandAvailable() {
+                    processPendingViewportCommand(toast_content);
+                }
             });
             configWatcher.init(context);
+        }
+    }
+
+    /** Retry a queued command when a hooked target has just become render-ready. */
+    static void processPendingViewportCommandIfReady() {
+        processPendingViewportCommand(toast_content);
+    }
+
+    /** Execute only the command targeted at this hooked host package. */
+    private static void processPendingViewportCommand(Context context) {
+        if (context == null) {
+            return;
+        }
+        try {
+            Bundle request = new Bundle();
+            request.putString(IpcContract.EXTRA_HOST_PACKAGE, context.getPackageName());
+            request.putLong(IpcContract.EXTRA_LAST_COMMAND_SEQ, lastViewportCommandSequence);
+            Bundle pending = context.getContentResolver().call(
+                    IpcContract.CONTENT_URI,
+                    IpcContract.METHOD_GET_PENDING_VIEWPORT_COMMAND,
+                    null,
+                    request);
+            if (pending == null || !pending.getBoolean(IpcContract.EXTRA_CHANGED, false)) {
+                return;
+            }
+            long sequence = pending.getLong(IpcContract.EXTRA_COMMAND_SEQ, 0L);
+            if (sequence <= lastViewportCommandSequence) {
+                return;
+            }
+
+            Camera1SessionRegistry.Snapshot runtime = Camera1SessionRegistry.getLatestActive();
+            if (runtime == null) {
+                return;
+            }
+            ConfigManager config = getConfig();
+            config.forceReload();
+            if (!ConfigManager.ASPECT_MODE_DYNAMIC.equals(
+                    config.getString(ConfigManager.KEY_VIDEO_ASPECT_MODE,
+                            ConfigManager.ASPECT_MODE_DYNAMIC))) {
+                ackViewportCommand(context, sequence);
+                lastViewportCommandSequence = sequence;
+                return;
+            }
+            ConfigManager.ActiveBinding activeBinding = config.getActiveBinding();
+            if (activeBinding == null || activeBinding.getViewport() == null) {
+                ackViewportCommand(context, sequence);
+                lastViewportCommandSequence = sequence;
+                return;
+            }
+
+            int[] sourceSize = playerManager.getActiveSourceSize();
+            if (sourceSize[0] <= 0 || sourceSize[1] <= 0
+                    || runtime.getPreviewWidth() <= 0 || runtime.getPreviewHeight() <= 0) {
+                // Keep the command queued until MediaPlayer and Camera1 have
+                // both reported their actual geometry.
+                return;
+            }
+            String command = pending.getString(IpcContract.EXTRA_VIEWPORT_COMMAND, "");
+            int rotation = config.getInt(ConfigManager.KEY_VIDEO_ROTATION_OFFSET, 0);
+            ViewportCommandController.Result result = ViewportCommandController.apply(
+                    activeBinding.getViewport(), command, rotation,
+                    runtime.getPreviewTransformFlags(),
+                    sourceSize[0], sourceSize[1],
+                    runtime.getPreviewWidth(), runtime.getPreviewHeight(),
+                    config.getViewportMoveStepPercent());
+            if (result.isChanged() && config.setActiveBindingViewport(result.getViewport())) {
+                // Apply immediately in this target process; the config observer
+                // remains responsible for other renderer instances.
+                playerManager.updateViewport();
+            }
+            ackViewportCommand(context, sequence);
+            lastViewportCommandSequence = sequence;
+        } catch (Throwable t) {
+            LogUtil.log("[VFC][ViewportCommand] 执行 runtime command 失败: " + t);
+        }
+    }
+
+    private static void ackViewportCommand(Context context, long sequence) {
+        try {
+            Bundle ack = new Bundle();
+            ack.putString(IpcContract.EXTRA_HOST_PACKAGE, context.getPackageName());
+            ack.putLong(IpcContract.EXTRA_COMMAND_SEQ, sequence);
+            context.getContentResolver().call(
+                    IpcContract.CONTENT_URI,
+                    IpcContract.METHOD_ACK_VIEWPORT_COMMAND,
+                    null,
+                    ack);
+        } catch (Throwable t) {
+            LogUtil.log("[VFC][ViewportCommand] ack failed: " + t);
         }
     }
 
@@ -256,6 +351,7 @@ public class HookMain {
                         toast_content = application.getApplicationContext();
                         VideoManager.setContext(toast_content);
                         getConfig().setContext(toast_content);
+                        Camera1SessionRegistry.setContext(toast_content);
                         // Keep target-process readers aligned with the v0.2
                         // preset model and force hidden audio flags off.
                         getConfig().migrateV02Configuration();

@@ -10,103 +10,109 @@ public class VirtualSensorGeometryTest {
     private static final float EPSILON = 0.0001f;
 
     @Test
-    public void matchingSixteenByNineOutputKeepsTheWholeSource() {
+    public void requestedFootprintFitsPortraitCanvasWithoutExpanding() {
         VirtualSensorGeometry.Calculation result = VirtualSensorGeometry.calculate(
-                1920, 1080, 1600, 900, 0, 0.5f, 0.5f, RenderTargetRole.PREVIEW);
+                1080, 1920, 1600, 728, 0, 0.5f, 0.5f, 1.0f,
+                RenderTargetRole.PREVIEW);
 
         assertTrue(result.valid);
-        assertEquals(1.0f, result.sourceCropRect.width(), EPSILON);
-        assertEquals(1.0f, result.sourceCropRect.height(), EPSILON);
-        assertEquals(1.7777778f, result.sourceAspect, EPSILON);
-        assertEquals(1.7777778f, result.targetAspect, EPSILON);
+        assertEquals(0.675f, result.fitScale, EPSILON);
+        assertEquals(1080.0f, result.baseViewportWidth, EPSILON);
+        assertEquals(491.4f, result.baseViewportHeight, EPSILON);
+        assertEquals(1.0f, result.logicalCropRect.width(), EPSILON);
+        assertEquals(491.4f / 1920.0f, result.logicalCropRect.height(), EPSILON);
+        assertEquals(1080.0f / 1920.0f, result.sourceAspect, EPSILON);
+        assertEquals(1600.0f / 728.0f, result.targetAspect, EPSILON);
     }
 
     @Test
-    public void dynamicLandscapeTargetCropsTallSourceWithoutStretching() {
+    public void requestedFootprintDoesNotBecomeMaximumAspectCrop() {
         VirtualSensorGeometry.Calculation result = VirtualSensorGeometry.calculate(
-                1080, 1920, 1920, 1080, 0, 0.5f, 0.5f, RenderTargetRole.PREVIEW);
+                1920, 1080, 640, 480, 0, 0.5f, 0.5f, 1.0f,
+                RenderTargetRole.PREVIEW);
 
         assertTrue(result.valid);
-        assertEquals(1080, result.logicalSensorWidth);
-        assertEquals(1920, result.logicalSensorHeight);
-        assertEquals(1.0f, result.sourceCropRect.width(), EPSILON);
-        assertEquals(0.31640625f, result.sourceCropRect.height(), EPSILON);
-        assertEquals(0.0f, result.sourceCropRect.left, EPSILON);
-        assertEquals(0.341796875f, result.sourceCropRect.top, EPSILON);
+        assertEquals(1.0f, result.fitScale, EPSILON);
+        assertEquals(640.0f, result.baseViewportWidth, EPSILON);
+        assertEquals(480.0f, result.baseViewportHeight, EPSILON);
+        assertEquals(640.0f / 1920.0f, result.logicalCropRect.width(), EPSILON);
+        assertEquals(480.0f / 1080.0f, result.logicalCropRect.height(), EPSILON);
     }
 
     @Test
-    public void dynamicPortraitTargetCropsWideSourceWithoutStretching() {
+    public void zoomReducesBothViewportAxesWithTheSameFactor() {
+        VirtualSensorGeometry.Calculation zoomOne = VirtualSensorGeometry.calculate(
+                1920, 1080, 640, 480, 0, 0.5f, 0.5f, 1.0f,
+                RenderTargetRole.PREVIEW);
+        VirtualSensorGeometry.Calculation zoomTwo = VirtualSensorGeometry.calculate(
+                1920, 1080, 640, 480, 0, 0.5f, 0.5f, 2.0f,
+                RenderTargetRole.PREVIEW);
+        VirtualSensorGeometry.Calculation zoomFour = VirtualSensorGeometry.calculate(
+                1920, 1080, 640, 480, 0, 0.5f, 0.5f, 4.0f,
+                RenderTargetRole.PREVIEW);
+
+        assertEquals(640.0f / 1920.0f, zoomOne.logicalCropRect.width(), EPSILON);
+        assertEquals(480.0f / 1080.0f, zoomOne.logicalCropRect.height(), EPSILON);
+        assertEquals(320.0f / 1920.0f, zoomTwo.logicalCropRect.width(), EPSILON);
+        assertEquals(240.0f / 1080.0f, zoomTwo.logicalCropRect.height(), EPSILON);
+        assertEquals(160.0f / 1920.0f, zoomFour.logicalCropRect.width(), EPSILON);
+        assertEquals(120.0f / 1080.0f, zoomFour.logicalCropRect.height(), EPSILON);
+    }
+
+    @Test
+    public void quarterTurnSwapsCanvasBeforeFitting() {
         VirtualSensorGeometry.Calculation result = VirtualSensorGeometry.calculate(
-                1920, 1080, 1080, 1920, 0, 0.5f, 0.5f, RenderTargetRole.PREVIEW);
-
-        assertTrue(result.valid);
-        assertEquals(0.31640625f, result.sourceCropRect.width(), EPSILON);
-        assertEquals(1.0f, result.sourceCropRect.height(), EPSILON);
-        assertEquals(0.341796875f, result.sourceCropRect.left, EPSILON);
-        assertEquals(0.0f, result.sourceCropRect.top, EPSILON);
-    }
-
-    @Test
-    public void commonPortraitAndFourByThreeTargetsRemainFiniteAndClamped() {
-        VirtualSensorGeometry.Calculation portrait = VirtualSensorGeometry.calculate(
-                1920, 1080, 720, 1280, 0, 0.5f, 0.5f, RenderTargetRole.PREVIEW);
-        VirtualSensorGeometry.Calculation fourByThree = VirtualSensorGeometry.calculate(
-                1920, 1080, 1440, 1080, 0, 0.0f, 1.0f, RenderTargetRole.PREVIEW);
-
-        assertEquals(0.31640625f, portrait.sourceCropRect.width(), EPSILON);
-        assertEquals(1.0f, portrait.sourceCropRect.height(), EPSILON);
-        assertEquals(0.75f, fourByThree.sourceCropRect.width(), EPSILON);
-        assertEquals(1.0f, fourByThree.sourceCropRect.height(), EPSILON);
-        for (VirtualSensorGeometry.Calculation result : new VirtualSensorGeometry.Calculation[] {
-                portrait, fourByThree
-        }) {
-            assertTrue(result.valid);
-            assertTrue(result.sourceCropRect.left >= 0.0f);
-            assertTrue(result.sourceCropRect.top >= 0.0f);
-            assertTrue(result.sourceCropRect.right <= 1.0f);
-            assertTrue(result.sourceCropRect.bottom <= 1.0f);
-            assertTrue(Float.isFinite(result.sourceAspect));
-            assertTrue(Float.isFinite(result.targetAspect));
-        }
-    }
-
-    @Test
-    public void quarterTurnSwapsLogicalSensorDimensionsAndSourceCropAxes() {
-        VirtualSensorGeometry.Calculation result = VirtualSensorGeometry.calculate(
-                1080, 1920, 1920, 1080, 90, 0.5f, 0.5f, RenderTargetRole.PREVIEW);
+                1080, 1920, 1600, 728, 90, 0.5f, 0.5f, 1.0f,
+                RenderTargetRole.PREVIEW);
 
         assertTrue(result.valid);
         assertEquals(1920, result.logicalSensorWidth);
         assertEquals(1080, result.logicalSensorHeight);
-        assertEquals(1.0f, result.logicalCropRect.width(), EPSILON);
-        assertEquals(1.0f, result.logicalCropRect.height(), EPSILON);
-        assertEquals(1.0f, result.sourceCropRect.width(), EPSILON);
-        assertEquals(1.0f, result.sourceCropRect.height(), EPSILON);
+        assertEquals(1.0f, result.fitScale, EPSILON);
+        assertEquals(1600.0f, result.baseViewportWidth, EPSILON);
+        assertEquals(728.0f, result.baseViewportHeight, EPSILON);
+        assertEquals(1600.0f / 1920.0f, result.logicalCropRect.width(), EPSILON);
+        assertEquals(728.0f / 1080.0f, result.logicalCropRect.height(), EPSILON);
     }
 
     @Test
-    public void readerUsesRawTargetAndDoesNotUseHostOrientation() {
-        VirtualSensorGeometry.Calculation preview = VirtualSensorGeometry.calculate(
-                1080, 1920, 1600, 728, 0, 0.5f, 0.5f, RenderTargetRole.PREVIEW);
+    public void readerKeepsItsRawRequestedGeometryAndRole() {
         VirtualSensorGeometry.Calculation reader = VirtualSensorGeometry.calculate(
-                1080, 1920, 1600, 728, 0, 0.5f, 0.5f, RenderTargetRole.READER);
+                1080, 1920, 1600, 728, 0, 0.5f, 0.5f, 1.0f,
+                RenderTargetRole.READER);
 
-        assertEquals(preview.targetAspect, reader.targetAspect, EPSILON);
-        assertEquals(preview.sourceCropRect.width(), reader.sourceCropRect.width(), EPSILON);
-        assertEquals(preview.sourceCropRect.height(), reader.sourceCropRect.height(), EPSILON);
+        assertTrue(reader.valid);
         assertEquals(RenderTargetRole.READER, reader.role);
+        assertEquals(1600, reader.requestedWidth);
+        assertEquals(728, reader.requestedHeight);
+        assertEquals(1.0f, reader.logicalCropRect.width(), EPSILON);
+        assertEquals(491.4f / 1920.0f, reader.logicalCropRect.height(), EPSILON);
     }
 
     @Test
-    public void anchorsClampToTheMovableCropArea() {
+    public void anchorsClampToTheEffectiveViewport() {
         VirtualSensorGeometry.Calculation result = VirtualSensorGeometry.calculate(
-                1080, 1920, 1920, 1080, 0, 0.0f, 1.0f, RenderTargetRole.PREVIEW);
+                1920, 1080, 640, 480, 0, 0.0f, 1.0f, 1.0f,
+                RenderTargetRole.PREVIEW);
 
-        assertEquals(0.5f, result.logicalAnchorU, EPSILON);
-        assertEquals(0.841796875f, result.logicalAnchorV, EPSILON);
-        assertEquals(0.0f, result.sourceCropRect.left, EPSILON);
-        assertEquals(0.68359375f, result.sourceCropRect.top, EPSILON);
+        assertEquals(0.5f * (640.0f / 1920.0f), result.logicalAnchorU, EPSILON);
+        assertEquals(1.0f - 0.5f * (480.0f / 1080.0f), result.logicalAnchorV, EPSILON);
+        assertEquals(0.0f, result.logicalCropRect.left, EPSILON);
+        assertEquals(1.0f - 480.0f / 1080.0f, result.logicalCropRect.top, EPSILON);
+        assertEquals(1.0f, result.logicalCropRect.bottom, EPSILON);
+    }
+
+    @Test
+    public void dynamicTextureMatrixMapsQuarterTurnFromLogicalToSource() {
+        VirtualSensorGeometry.Calculation result = VirtualSensorGeometry.calculate(
+                1920, 1080, 640, 480, 90, 0.5f, 0.5f, 1.0f,
+                RenderTargetRole.PREVIEW);
+        float[] matrix = VirtualSensorGeometry.buildDynamicTextureMatrix(result);
+
+        assertEquals(result.logicalCropRect.bottom, matrix[12], EPSILON);
+        assertEquals(result.logicalCropRect.left, matrix[13], EPSILON);
+        assertEquals(-result.logicalCropRect.height(), matrix[4], EPSILON);
+        assertEquals(result.logicalCropRect.width(), matrix[1], EPSILON);
     }
 
     @Test

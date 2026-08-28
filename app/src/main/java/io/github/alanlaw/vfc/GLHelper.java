@@ -16,6 +16,7 @@ public final class GLHelper {
     // ---- Shared Shader Sources ----
 
     public static final String VERTEX_SHADER = "uniform mat4 uSTMatrix;\n" +
+            "uniform mat4 uDynamicTextureMatrix;\n" +
             "uniform mat4 uCropMatrix;\n" +
             "uniform mat4 uRotMatrix;\n" +
             "attribute vec4 aPosition;\n" +
@@ -23,7 +24,7 @@ public final class GLHelper {
             "varying vec2 vTextureCoord;\n" +
             "void main() {\n" +
             "    gl_Position = uRotMatrix * aPosition;\n" +
-            "    vTextureCoord = (uSTMatrix * uCropMatrix * aTextureCoord).xy;\n" +
+            "    vTextureCoord = (uSTMatrix * uDynamicTextureMatrix * uCropMatrix * aTextureCoord).xy;\n" +
             "}\n";
 
     public static final String FRAGMENT_SHADER = "#extension GL_OES_EGL_image_external : require\n" +

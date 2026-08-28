@@ -11,14 +11,21 @@ import android.util.Log;
 
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.util.ArrayDeque;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 import io.github.alanlaw.vfc.utils.VideoManager;
 
 public class VideoProvider extends ContentProvider {
     private ConfigManager configManager;
+    private final Object runtimeLock = new Object();
+    private final Map<String, CameraRuntimeState> runtimeStates = new HashMap<>();
+    private final Map<String, ArrayDeque<ViewportCommand>> pendingViewportCommands = new HashMap<>();
+    private long nextViewportCommandSequence;
 
     private boolean isCallerAllowed() {
         android.content.Context context = getContext();
@@ -266,6 +273,9 @@ public class VideoProvider extends ContentProvider {
             denied.putBoolean(IpcContract.EXTRA_CHANGED, false);
             return denied;
         }
+        if (isRuntimeMethod(method)) {
+            return handleRuntimeCall(method, extras);
+        }
         configManager.reload();
         boolean changed = false;
 
@@ -310,6 +320,252 @@ public class VideoProvider extends ContentProvider {
         Bundle result = new Bundle();
         result.putBoolean(IpcContract.EXTRA_CHANGED, changed);
         return result;
+    }
+
+    private boolean isRuntimeMethod(String method) {
+        return IpcContract.METHOD_REPORT_CAMERA_RUNTIME.equals(method)
+                || IpcContract.METHOD_ENQUEUE_VIEWPORT_COMMAND.equals(method)
+                || IpcContract.METHOD_GET_PENDING_VIEWPORT_COMMAND.equals(method)
+                || IpcContract.METHOD_ACK_VIEWPORT_COMMAND.equals(method)
+                || IpcContract.METHOD_HAS_ACTIVE_CAMERA.equals(method);
+    }
+
+    private Bundle handleRuntimeCall(String method, Bundle extras) {
+        if (IpcContract.METHOD_REPORT_CAMERA_RUNTIME.equals(method)) {
+            return reportCameraRuntime(extras);
+        }
+        if (IpcContract.METHOD_ENQUEUE_VIEWPORT_COMMAND.equals(method)) {
+            return enqueueViewportCommand(extras);
+        }
+        if (IpcContract.METHOD_GET_PENDING_VIEWPORT_COMMAND.equals(method)) {
+            return getPendingViewportCommand(extras);
+        }
+        if (IpcContract.METHOD_HAS_ACTIVE_CAMERA.equals(method)) {
+            return hasActiveCamera();
+        }
+        return ackViewportCommand(extras);
+    }
+
+    private Bundle hasActiveCamera() {
+        Bundle result = new Bundle();
+        boolean active = false;
+        synchronized (runtimeLock) {
+            for (CameraRuntimeState state : runtimeStates.values()) {
+                if (state.active) {
+                    active = true;
+                    break;
+                }
+            }
+        }
+        result.putBoolean(IpcContract.EXTRA_CHANGED, active);
+        return result;
+    }
+
+    private Bundle reportCameraRuntime(Bundle extras) {
+        Bundle result = new Bundle();
+        if (extras == null) {
+            result.putBoolean(IpcContract.EXTRA_CHANGED, false);
+            return result;
+        }
+        String hostPackage = extras.getString(IpcContract.EXTRA_HOST_PACKAGE, "").trim();
+        if (!isCallingPackage(hostPackage)) {
+            result.putBoolean(IpcContract.EXTRA_CHANGED, false);
+            return result;
+        }
+        CameraRuntimeState next = new CameraRuntimeState(
+                hostPackage,
+                extras.getString(IpcContract.EXTRA_CAMERA_API, ""),
+                extras.getInt(IpcContract.EXTRA_CAMERA_ID, -1),
+                extras.getInt(IpcContract.EXTRA_CAMERA_FACING, -1),
+                extras.getInt(IpcContract.EXTRA_SENSOR_ORIENTATION, -1),
+                extras.getInt(IpcContract.EXTRA_DISPLAY_ORIENTATION, 0),
+                extras.getInt(IpcContract.EXTRA_PREVIEW_TRANSFORM_FLAGS, 0),
+                extras.getInt(IpcContract.EXTRA_PREVIEW_WIDTH, 0),
+                extras.getInt(IpcContract.EXTRA_PREVIEW_HEIGHT, 0),
+                extras.getBoolean(IpcContract.EXTRA_PREVIEW_ACTIVE, false),
+                extras.getLong(IpcContract.EXTRA_GENERATION, 0L),
+                extras.getLong(IpcContract.EXTRA_TIMESTAMP, System.currentTimeMillis()));
+        synchronized (runtimeLock) {
+            CameraRuntimeState previous = runtimeStates.get(hostPackage);
+            if (previous == null || next.generation >= previous.generation) {
+                runtimeStates.put(hostPackage, next);
+                if (!next.active) {
+                    pendingViewportCommands.remove(hostPackage);
+                }
+            }
+        }
+        result.putBoolean(IpcContract.EXTRA_CHANGED, true);
+        return result;
+    }
+
+    private Bundle enqueueViewportCommand(Bundle extras) {
+        Bundle result = new Bundle();
+        String command = extras == null ? ""
+                : extras.getString(IpcContract.EXTRA_VIEWPORT_COMMAND, "").trim();
+        if (!isViewportCommand(command)) {
+            result.putBoolean(IpcContract.EXTRA_CHANGED, false);
+            return result;
+        }
+
+        CameraRuntimeState target = null;
+        synchronized (runtimeLock) {
+            for (CameraRuntimeState state : runtimeStates.values()) {
+                if (!state.active || (target != null && state.generation <= target.generation)) {
+                    continue;
+                }
+                target = state;
+            }
+            if (target != null) {
+                long sequence = ++nextViewportCommandSequence;
+                ArrayDeque<ViewportCommand> queue = pendingViewportCommands.get(target.hostPackage);
+                if (queue == null) {
+                    queue = new ArrayDeque<>();
+                    pendingViewportCommands.put(target.hostPackage, queue);
+                }
+                queue.addLast(new ViewportCommand(sequence, target.hostPackage, command));
+                result.putBoolean(IpcContract.EXTRA_CHANGED, true);
+                result.putLong(IpcContract.EXTRA_COMMAND_SEQ, sequence);
+                result.putString(IpcContract.EXTRA_TARGET_PACKAGE, target.hostPackage);
+            } else {
+                result.putBoolean(IpcContract.EXTRA_CHANGED, false);
+            }
+        }
+        if (result.getBoolean(IpcContract.EXTRA_CHANGED, false)) {
+            getContext().getContentResolver().notifyChange(IpcContract.URI_RUNTIME_COMMAND, null);
+        }
+        return result;
+    }
+
+    private Bundle getPendingViewportCommand(Bundle extras) {
+        Bundle result = new Bundle();
+        String hostPackage = extras == null ? ""
+                : extras.getString(IpcContract.EXTRA_HOST_PACKAGE, "").trim();
+        long lastSequence = extras == null ? 0L
+                : extras.getLong(IpcContract.EXTRA_LAST_COMMAND_SEQ, 0L);
+        if (!isCallingPackage(hostPackage)) {
+            result.putBoolean(IpcContract.EXTRA_CHANGED, false);
+            return result;
+        }
+        synchronized (runtimeLock) {
+            ArrayDeque<ViewportCommand> queue = pendingViewportCommands.get(hostPackage);
+            if (queue != null) {
+                while (!queue.isEmpty() && queue.peekFirst().sequence <= lastSequence) {
+                    queue.removeFirst();
+                }
+                if (queue.isEmpty()) {
+                    pendingViewportCommands.remove(hostPackage);
+                    queue = null;
+                }
+            }
+            ViewportCommand command = queue == null ? null : queue.peekFirst();
+            if (command == null) {
+                result.putBoolean(IpcContract.EXTRA_CHANGED, false);
+                return result;
+            }
+            result.putBoolean(IpcContract.EXTRA_CHANGED, true);
+            result.putLong(IpcContract.EXTRA_COMMAND_SEQ, command.sequence);
+            result.putString(IpcContract.EXTRA_TARGET_PACKAGE, command.targetPackage);
+            result.putString(IpcContract.EXTRA_VIEWPORT_COMMAND, command.command);
+            return result;
+        }
+    }
+
+    private Bundle ackViewportCommand(Bundle extras) {
+        Bundle result = new Bundle();
+        String hostPackage = extras == null ? ""
+                : extras.getString(IpcContract.EXTRA_HOST_PACKAGE, "").trim();
+        long sequence = extras == null ? 0L
+                : extras.getLong(IpcContract.EXTRA_COMMAND_SEQ, 0L);
+        boolean removed = false;
+        if (isCallingPackage(hostPackage) && sequence > 0L) {
+            synchronized (runtimeLock) {
+                ArrayDeque<ViewportCommand> queue = pendingViewportCommands.get(hostPackage);
+                if (queue != null) {
+                    ViewportCommand first = queue.peekFirst();
+                    if (first != null && first.sequence == sequence) {
+                        queue.removeFirst();
+                        removed = true;
+                    }
+                    if (queue.isEmpty()) {
+                        pendingViewportCommands.remove(hostPackage);
+                    }
+                }
+            }
+        }
+        result.putBoolean(IpcContract.EXTRA_CHANGED, removed);
+        return result;
+    }
+
+    private boolean isCallingPackage(String packageName) {
+        if (packageName == null || packageName.isEmpty() || getContext() == null) {
+            return false;
+        }
+        String[] packages = getContext().getPackageManager()
+                .getPackagesForUid(Binder.getCallingUid());
+        if (packages == null) {
+            return false;
+        }
+        for (String candidate : packages) {
+            if (packageName.equals(candidate)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isViewportCommand(String command) {
+        return IpcContract.VIEWPORT_COMMAND_UP.equals(command)
+                || IpcContract.VIEWPORT_COMMAND_DOWN.equals(command)
+                || IpcContract.VIEWPORT_COMMAND_LEFT.equals(command)
+                || IpcContract.VIEWPORT_COMMAND_RIGHT.equals(command)
+                || IpcContract.VIEWPORT_COMMAND_ZOOM_IN.equals(command)
+                || IpcContract.VIEWPORT_COMMAND_ZOOM_OUT.equals(command)
+                || IpcContract.VIEWPORT_COMMAND_RESET.equals(command);
+    }
+
+    private static final class ViewportCommand {
+        final long sequence;
+        final String targetPackage;
+        final String command;
+
+        ViewportCommand(long sequence, String targetPackage, String command) {
+            this.sequence = sequence;
+            this.targetPackage = targetPackage;
+            this.command = command;
+        }
+    }
+
+    private static final class CameraRuntimeState {
+        final String hostPackage;
+        final String cameraApi;
+        final int cameraId;
+        final int facing;
+        final int sensorOrientation;
+        final int displayOrientation;
+        final int previewTransformFlags;
+        final int previewWidth;
+        final int previewHeight;
+        final boolean active;
+        final long generation;
+        final long timestamp;
+
+        CameraRuntimeState(String hostPackage, String cameraApi, int cameraId, int facing,
+                int sensorOrientation, int displayOrientation, int previewTransformFlags,
+                int previewWidth, int previewHeight, boolean active, long generation,
+                long timestamp) {
+            this.hostPackage = hostPackage;
+            this.cameraApi = cameraApi;
+            this.cameraId = cameraId;
+            this.facing = facing;
+            this.sensorOrientation = sensorOrientation;
+            this.displayOrientation = displayOrientation;
+            this.previewTransformFlags = previewTransformFlags;
+            this.previewWidth = previewWidth;
+            this.previewHeight = previewHeight;
+            this.active = active;
+            this.generation = generation;
+            this.timestamp = timestamp;
+        }
     }
 
     /**

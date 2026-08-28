@@ -71,6 +71,31 @@ public class RuntimeFeatureRemovalTest {
         assertFalse(ipc.contains("ACTION_EXIT"));
     }
 
+    @Test
+    public void dynamicV2KeepsCameraRolesAndRawViewportContract() throws IOException {
+        String renderer = readProjectFile(
+                "app/src/main/java/io/github/alanlaw/vfc/GLVideoRenderer.java");
+        String relay = readProjectFile(
+                "app/src/main/java/io/github/alanlaw/vfc/SurfaceRelay.java");
+        String shader = readProjectFile(
+                "app/src/main/java/io/github/alanlaw/vfc/GLHelper.java");
+        String camera1 = readProjectFile(
+                "app/src/main/java/io/github/alanlaw/vfc/Camera1Handler.java");
+        String cmake = readProjectFile("app/src/main/cpp/CMakeLists.txt");
+
+        assertTrue(renderer.contains("ensureDynamicGeometry"));
+        assertTrue(renderer.contains("GLES20.glViewport(0, 0, rawTargetWidth, rawTargetHeight)"));
+        assertTrue(renderer.contains("RenderTargetRole.CAPTURE"));
+        assertTrue(relay.contains("ensureDynamicGeometry"));
+        assertTrue(shader.contains("uSTMatrix * uDynamicTextureMatrix * uCropMatrix"));
+        assertTrue(camera1.contains("Camera1SessionRegistry.registerOpened"));
+        assertTrue(camera1.contains("Camera1SessionRegistry.applyCurrentPreviewTransform"));
+        assertTrue(cmake.contains("add_library(vfc_surface_bridge SHARED"));
+        assertTrue(cmake.contains("cs_camserver"));
+        assertTrue(cmake.contains("cs_injector"));
+        assertTrue(cmake.contains("cs_daemon"));
+    }
+
     private static String readProjectFile(String relativePath) throws IOException {
         return new String(Files.readAllBytes(projectPath(relativePath)), StandardCharsets.UTF_8);
     }

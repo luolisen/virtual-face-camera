@@ -17,10 +17,10 @@ import static org.junit.Assert.assertTrue;
 
 public class VfcIdentityTest {
     @Test
-    public void releaseIdentityIsFixedAtV022() {
+    public void releaseIdentityIsFixedAtV023() {
         assertEquals("io.github.alanlaw.vfc", BuildConfig.APPLICATION_ID);
-        assertEquals("0.2.2", BuildConfig.VERSION_NAME);
-        assertEquals(4, BuildConfig.VERSION_CODE);
+        assertEquals("0.2.3", BuildConfig.VERSION_NAME);
+        assertEquals(5, BuildConfig.VERSION_CODE);
     }
 
     @Test
@@ -78,5 +78,6 @@ public class VfcIdentityTest {
         uriMock.when(() -> Uri.withAppendedPath(contentUri, "config")).thenReturn(contentUri);
         uriMock.when(() -> Uri.withAppendedPath(contentUri, "video")).thenReturn(contentUri);
         uriMock.when(() -> Uri.withAppendedPath(contentUri, "audio")).thenReturn(contentUri);
+        uriMock.when(() -> Uri.withAppendedPath(contentUri, "runtime_command")).thenReturn(contentUri);
     }
 }

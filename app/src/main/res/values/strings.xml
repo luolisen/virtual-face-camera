@@ -143,6 +143,7 @@
     <string name="overlay_action_viewport">取景</string>
     <string name="overlay_viewport_dynamic_only">取景控制仅用于动态模式</string>
     <string name="overlay_viewport_no_active">请先通过快捷键选择视频</string>
+    <string name="overlay_viewport_no_camera">当前没有活动摄像头</string>
 
     <!-- Home Screen - Version Card -->
     <string name="version_current">当前版本</string>

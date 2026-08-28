@@ -32,6 +32,7 @@ public class Camera1Handler implements ICameraHandler {
     public void init(final Api101PackageContext packageContext) {
         final ClassLoader classLoader = packageContext.classLoader;
         final String packageName = packageContext.packageName;
+        hookCameraOpen(classLoader);
         hookSetPreviewTexture(classLoader, packageName);
         hookStartPreview(classLoader, packageName);
         hookSetPreviewDisplay(classLoader, packageName);
@@ -43,6 +44,27 @@ public class Camera1Handler implements ICameraHandler {
         hookStopPreview(classLoader);
         hookRelease(classLoader);
         hookTakePicture(classLoader);
+    }
+
+    private void hookCameraOpen(ClassLoader classLoader) {
+        hookCameraMethod(classLoader, "open", new Class<?>[0], chain -> {
+            Object result = chain.proceed(toArgs(chain.getArgs()));
+            if (result instanceof Camera) {
+                Camera1SessionRegistry.registerOpened((Camera) result,
+                        Camera1SessionRegistry.findFirstBackCameraId());
+            }
+            return result;
+        });
+        hookCameraMethod(classLoader, "open", new Class<?>[] { int.class }, chain -> {
+            Object[] args = toArgs(chain.getArgs());
+            Object result = chain.proceed(args);
+            if (result instanceof Camera) {
+                int cameraId = args.length > 0 && args[0] instanceof Integer
+                        ? (Integer) args[0] : Camera1SessionRegistry.UNKNOWN_CAMERA_ID;
+                Camera1SessionRegistry.registerOpened((Camera) result, cameraId);
+            }
+            return result;
+        });
     }
 
     private void hookSetPreviewTexture(ClassLoader classLoader, String packageName) {
@@ -77,6 +99,8 @@ public class Camera1Handler implements ICameraHandler {
 
                     HookMain.origin_preview_camera = (Camera) chain.getThisObject();
                     HookMain.mSurfacetexture = (SurfaceTexture) args[0];
+                    prepareTexturePreviewTarget(HookMain.origin_preview_camera,
+                            HookMain.mSurfacetexture);
                     if (HookMain.fake_SurfaceTexture == null) {
                         HookMain.fake_SurfaceTexture = new SurfaceTexture(10);
                     } else {
@@ -102,36 +126,61 @@ public class Camera1Handler implements ICameraHandler {
                     LogUtil.log("【CS】开始预览");
                     HookMain.start_preview_camera = (Camera) chain.getThisObject();
 
+                    Camera camera = HookMain.start_preview_camera;
+                    int previewWidth = 0;
+                    int previewHeight = 0;
+                    if (camera != null) {
+                        Camera1SessionRegistry.ensure(camera);
+                    }
                     try {
-                        android.hardware.Camera.Parameters params = HookMain.start_preview_camera.getParameters();
-                        android.hardware.Camera.Size size = params.getPreviewSize();
+                        android.hardware.Camera.Parameters params = camera == null
+                                ? null : camera.getParameters();
+                        android.hardware.Camera.Size size = params == null
+                                ? null : params.getPreviewSize();
                         if (size != null) {
-                            if (HookMain.mSurfacetexture != null) {
-                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.ICE_CREAM_SANDWICH_MR1) {
-                                    HookMain.mSurfacetexture.setDefaultBufferSize(size.width, size.height);
-                                }
-                                LogUtil.log("【CS】修正目标 SurfaceTexture 尺寸为: " + size.width + "x" + size.height);
+                            previewWidth = size.width;
+                            previewHeight = size.height;
+                            Camera1SessionRegistry.updatePreviewSize(camera,
+                                    previewWidth, previewHeight);
+                            if (HookMain.mSurfacetexture != null
+                                    && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.ICE_CREAM_SANDWICH_MR1) {
+                                HookMain.mSurfacetexture.setDefaultBufferSize(previewWidth, previewHeight);
+                                LogUtil.log("【CS】修正目标 SurfaceTexture 尺寸为: "
+                                        + previewWidth + "x" + previewHeight);
                             }
                             if (HookMain.ori_holder != null) {
-                                LogUtil.log("【CS】SurfaceHolder 保持原始尺寸，预览尺寸: " + size.width + "x" + size.height);
+                                LogUtil.log("【CS】SurfaceHolder 保持原始尺寸，预览尺寸: "
+                                        + previewWidth + "x" + previewHeight);
                             }
                         }
-                    } catch (Exception e) {
-                        LogUtil.log("【CS】修正 Surface 尺寸异常: " + e.getMessage());
+                    } catch (Exception ignored) {
+                    }
+                    if (camera != null) {
+                        Camera1SessionRegistry.applyCurrentPreviewTransform(camera);
                     }
 
                     if (HookMain.ori_holder != null) {
-                        prepareHolderPreviewPlayer();
+                        prepareHolderPreviewPlayer(previewWidth, previewHeight);
                     }
 
                     if (HookMain.mSurfacetexture != null) {
-                        prepareTexturePreviewPlayer();
+                        prepareTexturePreviewPlayer(previewWidth, previewHeight);
                     }
                 }
             } catch (Throwable t) {
                 LogUtil.log("【CS】startPreview before 异常: " + t);
             }
-            return chain.proceed(args);
+            Object result = chain.proceed(args);
+            try {
+                if (!HookGuards.shouldBypass(packageName, HookGuards.getCurrentVideoFile())) {
+                    Camera1SessionRegistry.setPreviewActive(
+                            (Camera) chain.getThisObject(), true);
+                    HookMain.processPendingViewportCommandIfReady();
+                }
+            } catch (Throwable t) {
+                LogUtil.log("[VFC][Camera1Session] startPreview state update failed: " + t);
+            }
+            return result;
         });
     }
 
@@ -146,6 +195,11 @@ public class Camera1Handler implements ICameraHandler {
                 }
                 HookMain.mcamera1 = (Camera) chain.getThisObject();
                 HookMain.ori_holder = (SurfaceHolder) args[0];
+                if (HookMain.ori_holder != null) {
+                    Camera1SessionRegistry.setPreviewTarget(
+                            HookMain.mcamera1, HookMain.ori_holder.getSurface());
+                    Camera1SessionRegistry.applyCurrentPreviewTransform(HookMain.mcamera1);
+                }
                 if (HookMain.mSurfacetexture != null) {
                     HookMain.mSurfacetexture = null;
                 }
@@ -170,6 +224,7 @@ public class Camera1Handler implements ICameraHandler {
                 }
                 HookMain.is_hooked = true;
                 HookMain.mcamera1.setPreviewTexture(HookMain.c1_fake_texture);
+                Camera1SessionRegistry.applyCurrentPreviewTransform(HookMain.mcamera1);
                 return null;
             } catch (Throwable t) {
                 LogUtil.log("【CS】setPreviewDisplay before 异常: " + t);
@@ -197,7 +252,7 @@ public class Camera1Handler implements ICameraHandler {
         });
     }
 
-    private void prepareHolderPreviewPlayer() {
+    private void prepareHolderPreviewPlayer(int requestedWidth, int requestedHeight) {
         if (HookMain.playerManager.mplayer1 == null) {
             HookMain.playerManager.mplayer1 = new MediaPlayer();
         } else {
@@ -213,10 +268,17 @@ public class Camera1Handler implements ICameraHandler {
                 RenderTargetRole.PREVIEW);
         HookMain.playerManager.c1_renderer_holder = renderer;
         if (renderer != null && renderer.isInitialized()) {
+            renderer.setRequestedFootprint(requestedWidth, requestedHeight);
+            updateRendererProducerTransform(HookMain.mcamera1);
+            Camera1SessionRegistry.setPreviewTarget(HookMain.mcamera1, HookMain.ori_holder.getSurface());
+            Camera1SessionRegistry.applyCurrentPreviewTransform(HookMain.mcamera1);
             HookMain.playerManager.mplayer1.setSurface(renderer.getInputSurface());
             HookMain.playerManager.configureRenderer(renderer, null);
             HookMain.playerManager.mplayer1.setOnVideoSizeChangedListener(
-                    (mp, width, height) -> renderer.setSourceSize(width, height));
+                    (mp, width, height) -> {
+                        renderer.setSourceSize(width, height);
+                        HookMain.processPendingViewportCommandIfReady();
+                    });
         } else {
             HookMain.playerManager.mplayer1.setSurface(HookMain.ori_holder.getSurface());
         }
@@ -244,13 +306,28 @@ public class Camera1Handler implements ICameraHandler {
         }
     }
 
-    private void prepareTexturePreviewPlayer() {
+    private void prepareTexturePreviewTarget(Camera camera, SurfaceTexture texture) {
+        if (camera == null || texture == null) {
+            return;
+        }
+        try {
+            if (HookMain.mSurface != null) {
+                HookMain.mSurface.release();
+            }
+            HookMain.mSurface = new Surface(texture);
+            Camera1SessionRegistry.setPreviewTarget(camera, HookMain.mSurface);
+            Camera1SessionRegistry.applyCurrentPreviewTransform(camera);
+        } catch (Throwable t) {
+            LogUtil.log("[VFC][Camera1Transform] 创建原始 Texture Surface 失败: " + t);
+        }
+    }
+
+    private void prepareTexturePreviewPlayer(int requestedWidth, int requestedHeight) {
         if (HookMain.mSurface == null) {
             HookMain.mSurface = new Surface(HookMain.mSurfacetexture);
-        } else {
-            HookMain.mSurface.release();
-            HookMain.mSurface = new Surface(HookMain.mSurfacetexture);
         }
+        Camera1SessionRegistry.setPreviewTarget(HookMain.origin_preview_camera, HookMain.mSurface);
+        Camera1SessionRegistry.applyCurrentPreviewTransform(HookMain.origin_preview_camera);
 
         if (HookMain.playerManager.mMediaPlayer == null) {
             HookMain.playerManager.mMediaPlayer = new MediaPlayer();
@@ -264,10 +341,15 @@ public class Camera1Handler implements ICameraHandler {
                 RenderTargetRole.PREVIEW);
         HookMain.playerManager.c1_renderer_texture = renderer;
         if (renderer != null && renderer.isInitialized()) {
+            renderer.setRequestedFootprint(requestedWidth, requestedHeight);
+            updateRendererProducerTransform(HookMain.origin_preview_camera);
             HookMain.playerManager.mMediaPlayer.setSurface(renderer.getInputSurface());
             HookMain.playerManager.configureRenderer(renderer, null);
             HookMain.playerManager.mMediaPlayer.setOnVideoSizeChangedListener(
-                    (mp, width, height) -> renderer.setSourceSize(width, height));
+                    (mp, width, height) -> {
+                        renderer.setSourceSize(width, height);
+                        HookMain.processPendingViewportCommandIfReady();
+                    });
         } else {
             HookMain.playerManager.mMediaPlayer.setSurface(HookMain.mSurface);
         }
@@ -293,6 +375,20 @@ public class Camera1Handler implements ICameraHandler {
             HookMain.playerManager.mMediaPlayer.prepare();
         } catch (Exception e) {
             LogUtil.log("【CS】mMediaPlayer prepare 异常: " + e.toString());
+        }
+    }
+
+    private void updateRendererProducerTransform(Camera camera) {
+        Camera1SessionRegistry.Snapshot snapshot = Camera1SessionRegistry.get(camera);
+        if (snapshot == null) {
+            return;
+        }
+        int flags = snapshot.getPreviewTransformFlags();
+        if (HookMain.playerManager.c1_renderer_holder != null) {
+            HookMain.playerManager.c1_renderer_holder.setProducerTransformFlags(flags);
+        }
+        if (HookMain.playerManager.c1_renderer_texture != null) {
+            HookMain.playerManager.c1_renderer_texture.setProducerTransformFlags(flags);
         }
     }
 
@@ -533,14 +629,19 @@ public class Camera1Handler implements ICameraHandler {
     private void hookSetDisplayOrientation(ClassLoader classLoader) {
         hookCameraMethod(classLoader, "setDisplayOrientation", new Class<?>[] { int.class }, chain -> {
             Object[] args = toArgs(chain.getArgs());
+            Object result = chain.proceed(args);
             try {
                 int degrees = (int) args[0];
                 HookMain.mDisplayOrientation = degrees;
+                Camera camera = (Camera) chain.getThisObject();
+                Camera1SessionRegistry.updateDisplayOrientation(camera, degrees);
+                Camera1SessionRegistry.applyCurrentPreviewTransform(camera);
+                updateRendererProducerTransform(camera);
                 LogUtil.log("【CS】setDisplayOrientation: " + degrees);
             } catch (Throwable t) {
-                LogUtil.log("【CS】setDisplayOrientation before 异常: " + t);
+                LogUtil.log("【CS】setDisplayOrientation after 异常: " + t);
             }
-            return chain.proceed(args);
+            return result;
         });
     }
 
@@ -590,7 +691,9 @@ public class Camera1Handler implements ICameraHandler {
         hookCameraMethod(classLoader, "stopPreview", new Class<?>[0], chain -> {
             LogUtil.log("【CS】Camera1 stopPreview，释放播放器资源");
             HookMain.playerManager.releaseCamera1Resources();
-            return chain.proceed(toArgs(chain.getArgs()));
+            Object result = chain.proceed(toArgs(chain.getArgs()));
+            Camera1SessionRegistry.setPreviewActive((Camera) chain.getThisObject(), false);
+            return result;
         });
     }
 
@@ -598,9 +701,18 @@ public class Camera1Handler implements ICameraHandler {
         hookCameraMethod(classLoader, "release", new Class<?>[0], chain -> {
             LogUtil.log("【CS】Camera1 release，释放播放器资源");
             HookMain.playerManager.releaseCamera1Resources();
+            Camera camera = (Camera) chain.getThisObject();
+            Camera1SessionRegistry.release(camera);
             HookMain.origin_preview_camera = null;
             HookMain.start_preview_camera = null;
             HookMain.camera_onPreviewFrame = null;
+            if (HookMain.mSurface != null) {
+                try {
+                    HookMain.mSurface.release();
+                } catch (Throwable ignored) {
+                }
+                HookMain.mSurface = null;
+            }
             return chain.proceed(toArgs(chain.getArgs()));
         });
     }

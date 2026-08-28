@@ -21,6 +21,7 @@ import java.nio.FloatBuffer;
 import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import android.graphics.Bitmap;
 
 /**
@@ -49,6 +50,7 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
     private int maTextureHandle;
     private int muSTMatrixHandle;
     private int muCropMatrixHandle;
+    private int muDynamicTextureMatrixHandle;
     private int muRotMatrixHandle;
     private int muAmbientColorHandle;
     private int muAmbientIntensityHandle;
@@ -61,6 +63,7 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
     // Matrices
     private final float[] mSTMatrix = new float[16];
     private final float[] mCropMatrix = new float[16];
+    private final float[] mDynamicTextureMatrix = new float[16];
     private final float[] mRotMatrix = new float[16];
 
     // State
@@ -74,8 +77,14 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
     private volatile String mActiveShortcutKey = "";
     private volatile float mSourceAnchorU = 0.5f;
     private volatile float mSourceAnchorV = 0.5f;
+    private volatile float mZoom = ConfigManager.DEFAULT_VIEWPORT_ZOOM;
+    private volatile int mRequestedWidth;
+    private volatile int mRequestedHeight;
+    private volatile int mProducerTransformFlags;
     private volatile int mViewportMoveStepPercent = ConfigManager.DEFAULT_VIEWPORT_MOVE_STEP_PERCENT;
-    private volatile VirtualSensorGeometry.NormalizedRect mLastValidDynamicCrop;
+    private volatile boolean mDynamicGeometryDirty = true;
+    private volatile boolean mDiagnosticDirty = true;
+    private VirtualSensorGeometry.Calculation mDynamicGeometry;
     private volatile boolean mReleased = false;
     private boolean mInitialized = false;
     private volatile int mSurfaceWidth = 0;
@@ -97,6 +106,12 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
     private ByteBuffer mCaptureBuffer;
     private int mCaptureBufferSize;
     private String mLastAspectDiagnostic;
+    private final int[] mEglWidth = new int[1];
+    private final int[] mEglHeight = new int[1];
+    private final AtomicBoolean mRenderTaskScheduled = new AtomicBoolean();
+    private final AtomicBoolean mFramePending = new AtomicBoolean();
+    private final Object mRenderScheduleLock = new Object();
+    private final Runnable mRenderRunnable = this::runCoalescedFrame;
 
     // Shader sources, vertices, and tex coords shared via GLHelper
 
@@ -118,6 +133,7 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
         Matrix.setIdentityM(mRotMatrix, 0);
         Matrix.setIdentityM(mSTMatrix, 0);
         Matrix.setIdentityM(mCropMatrix, 0);
+        Matrix.setIdentityM(mDynamicTextureMatrix, 0);
 
         mGLThread = new HandlerThread("GLRenderer-" + tag);
         mGLThread.start();
@@ -169,7 +185,12 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
      * 设置旋转角度（0/90/180/270），实时生效。
      */
     public void setRotation(int degrees) {
-        mRotationDegrees = ((degrees % 360) + 360) % 360;
+        int normalized = ((degrees % 360) + 360) % 360;
+        if (mRotationDegrees != normalized) {
+            mRotationDegrees = normalized;
+            mDynamicGeometryDirty = true;
+            mDiagnosticDirty = true;
+        }
     }
 
     public int getRotation() {
@@ -179,8 +200,12 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
     /** Set the dimensions reported by the active media playback chain. */
     public void setSourceSize(int width, int height) {
         if (width > 0 && height > 0) {
-            mSourceWidth = width;
-            mSourceHeight = height;
+            if (mSourceWidth != width || mSourceHeight != height) {
+                mSourceWidth = width;
+                mSourceHeight = height;
+                mDynamicGeometryDirty = true;
+                mDiagnosticDirty = true;
+            }
         }
     }
 
@@ -194,12 +219,18 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
 
     /** Set Dynamic (default), FIT, or CROP rendering. */
     public void setAspectMode(String aspectMode) {
+        String nextMode;
         if (ConfigManager.ASPECT_MODE_FIT.equals(aspectMode)) {
-            mAspectMode = ConfigManager.ASPECT_MODE_FIT;
+            nextMode = ConfigManager.ASPECT_MODE_FIT;
         } else if (ConfigManager.ASPECT_MODE_CROP.equals(aspectMode)) {
-            mAspectMode = ConfigManager.ASPECT_MODE_CROP;
+            nextMode = ConfigManager.ASPECT_MODE_CROP;
         } else {
-            mAspectMode = ConfigManager.ASPECT_MODE_DYNAMIC;
+            nextMode = ConfigManager.ASPECT_MODE_DYNAMIC;
+        }
+        if (!nextMode.equals(mAspectMode)) {
+            mAspectMode = nextMode;
+            mDynamicGeometryDirty = true;
+            mDiagnosticDirty = true;
         }
     }
 
@@ -213,9 +244,33 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
 
     /** Update host geometry for diagnostics only; it never affects rendering. */
     public void setHostWindowGeometry(HostWindowGeometry.Snapshot geometry) {
-        mHostWindowGeometry = geometry == null
+        HostWindowGeometry.Snapshot next = geometry == null
                 ? HostWindowGeometry.Snapshot.unavailable()
                 : geometry;
+        if (!next.equals(mHostWindowGeometry)) {
+            mHostWindowGeometry = next;
+            mDiagnosticDirty = true;
+        }
+    }
+
+    /** Set the requested camera footprint; zero means use the raw EGL target. */
+    public void setRequestedFootprint(int width, int height) {
+        int nextWidth = width > 0 && height > 0 ? width : 0;
+        int nextHeight = width > 0 && height > 0 ? height : 0;
+        if (mRequestedWidth != nextWidth || mRequestedHeight != nextHeight) {
+            mRequestedWidth = nextWidth;
+            mRequestedHeight = nextHeight;
+            mDynamicGeometryDirty = true;
+            mDiagnosticDirty = true;
+        }
+    }
+
+    /** Record the Camera1 producer transform for low-noise diagnostics. */
+    public void setProducerTransformFlags(int transformFlags) {
+        if (mProducerTransformFlags != transformFlags) {
+            mProducerTransformFlags = transformFlags;
+            mDiagnosticDirty = true;
+        }
     }
 
     /** Apply the active preset shortcut's decoded-source viewport anchor. */
@@ -227,19 +282,52 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
             mActiveShortcutKey = "";
             mSourceAnchorU = 0.5f;
             mSourceAnchorV = 0.5f;
+            mZoom = ConfigManager.DEFAULT_VIEWPORT_ZOOM;
+            mDynamicGeometryDirty = true;
+            mDiagnosticDirty = true;
             return;
         }
         mActivePresetId = activeBinding.getPresetId();
         mActiveShortcutKey = activeBinding.getShortcutKey();
         mSourceAnchorU = activeBinding.getViewport().getAnchorU();
         mSourceAnchorV = activeBinding.getViewport().getAnchorV();
+        mZoom = activeBinding.getViewport().getZoom();
+        mDynamicGeometryDirty = true;
+        mDiagnosticDirty = true;
     }
 
     @Override
     public void onFrameAvailable(SurfaceTexture surfaceTexture) {
-        if (mReleased || !mInitialized)
+        if (mReleased || !mInitialized || mGLHandler == null)
             return;
-        mGLHandler.post(this::drawFrame);
+        mFramePending.set(true);
+        synchronized (mRenderScheduleLock) {
+            if (!mRenderTaskScheduled.get()) {
+                mRenderTaskScheduled.set(true);
+                mGLHandler.post(mRenderRunnable);
+            }
+        }
+    }
+
+    private void runCoalescedFrame() {
+        while (!mReleased && mInitialized) {
+            mFramePending.set(false);
+            drawFrame();
+            synchronized (mRenderScheduleLock) {
+                if (mFramePending.get()) {
+                    continue;
+                }
+                mRenderTaskScheduled.set(false);
+                return;
+            }
+        }
+        synchronized (mRenderScheduleLock) {
+            mRenderTaskScheduled.set(false);
+            if (mFramePending.get() && !mReleased && mGLHandler != null) {
+                mRenderTaskScheduled.set(true);
+                mGLHandler.post(mRenderRunnable);
+            }
+        }
     }
 
     private void drawFrame() {
@@ -277,58 +365,58 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
         mInputSurfaceTexture.updateTexImage();
         mInputSurfaceTexture.getTransformMatrix(mSTMatrix);
 
-        // Query surface dimensions for viewport
-        int[] width = new int[1];
-        int[] height = new int[1];
-        EGL14.eglQuerySurface(mEGLDisplay, mEGLSurface, EGL14.EGL_WIDTH, width, 0);
-        EGL14.eglQuerySurface(mEGLDisplay, mEGLSurface, EGL14.EGL_HEIGHT, height, 0);
-        if (width[0] > 0) {
-            mSurfaceWidth = width[0];
+        // Query surface dimensions for the raw EGL viewport. These values
+        // are never replaced by host Activity/window geometry.
+        EGL14.eglQuerySurface(mEGLDisplay, mEGLSurface, EGL14.EGL_WIDTH, mEglWidth, 0);
+        EGL14.eglQuerySurface(mEGLDisplay, mEGLSurface, EGL14.EGL_HEIGHT, mEglHeight, 0);
+        int rawTargetWidth = mEglWidth[0];
+        int rawTargetHeight = mEglHeight[0];
+        if (rawTargetWidth > 0) {
+            if (mSurfaceWidth != rawTargetWidth) {
+                mDynamicGeometryDirty = true;
+                mDiagnosticDirty = true;
+            }
+            mSurfaceWidth = rawTargetWidth;
         }
-        if (height[0] > 0) {
-            mSurfaceHeight = height[0];
+        if (rawTargetHeight > 0) {
+            if (mSurfaceHeight != rawTargetHeight) {
+                mDynamicGeometryDirty = true;
+                mDiagnosticDirty = true;
+            }
+            mSurfaceHeight = rawTargetHeight;
         }
 
         // Set viewport to the EGL surface's actual dimensions
-        if (width[0] > 0 && height[0] > 0) {
-            GLES20.glViewport(0, 0, width[0], height[0]);
+        if (rawTargetWidth > 0 && rawTargetHeight > 0) {
+            GLES20.glViewport(0, 0, rawTargetWidth, rawTargetHeight);
         }
 
-        // The EGL dimensions are the physical Camera buffer dimensions. They
-        // are used for both viewport and aspect math; host Activity geometry
-        // is diagnostic-only and cannot rewrite this target.
+        RenderTargetRole effectiveRole = renderTargetRole == null
+                ? mRenderTargetRole : renderTargetRole;
         Matrix.setIdentityM(mRotMatrix, 0);
-        RenderTargetGeometry.Calculation geometry = RenderTargetGeometry.calculate(
-                width[0], height[0], mHostWindowGeometry, renderTargetRole);
-        VideoAspectLayout.Layout layout = VideoAspectLayout.calculate(
-                mSourceWidth, mSourceHeight,
-                width[0], height[0], mRotationDegrees, mAspectMode);
-        VirtualSensorGeometry.Calculation dynamicGeometry = null;
-        VirtualSensorGeometry.NormalizedRect dynamicCrop = null;
         Matrix.setIdentityM(mCropMatrix, 0);
-        if (ConfigManager.ASPECT_MODE_DYNAMIC.equals(mAspectMode)) {
-            dynamicGeometry = VirtualSensorGeometry.calculate(
-                    mSourceWidth, mSourceHeight,
-                    width[0], height[0], mRotationDegrees,
-                    mSourceAnchorU, mSourceAnchorV, renderTargetRole);
-            if (dynamicGeometry.valid) {
-                mLastValidDynamicCrop = dynamicGeometry.sourceCropRect;
-                dynamicCrop = dynamicGeometry.sourceCropRect;
-            } else if (mLastValidDynamicCrop != null) {
-                dynamicCrop = mLastValidDynamicCrop;
-            } else {
-                dynamicCrop = new VirtualSensorGeometry.NormalizedRect(0.0f, 0.0f, 1.0f, 1.0f);
-            }
-            float[] cropMatrix = VirtualSensorGeometry.buildTextureCropMatrix(dynamicCrop);
-            System.arraycopy(cropMatrix, 0, mCropMatrix, 0, mCropMatrix.length);
-            // Dynamic uses a full-screen quad. Cropping is done in texture
-            // coordinates, so uRotMatrix contains rotation only.
-        } else if (width[0] > 0 && height[0] > 0
-                && mSourceWidth > 0 && mSourceHeight > 0) {
-            Matrix.scaleM(mRotMatrix, 0, layout.scaleX, layout.scaleY, 1.0f);
+        if (!ConfigManager.ASPECT_MODE_DYNAMIC.equals(mAspectMode)) {
+            Matrix.setIdentityM(mDynamicTextureMatrix, 0);
         }
-        logAspectIfChanged(geometry, layout, dynamicGeometry, dynamicCrop);
-        if (mRotationDegrees != 0) {
+        if (ConfigManager.ASPECT_MODE_DYNAMIC.equals(mAspectMode)) {
+            ensureDynamicGeometry(rawTargetWidth, rawTargetHeight, effectiveRole);
+        } else if (rawTargetWidth > 0 && rawTargetHeight > 0
+                && mSourceWidth > 0 && mSourceHeight > 0) {
+            Matrix.setIdentityM(mDynamicTextureMatrix, 0);
+            VideoAspectLayout.Layout layout = VideoAspectLayout.calculate(
+                    mSourceWidth, mSourceHeight,
+                    rawTargetWidth, rawTargetHeight, mRotationDegrees, mAspectMode);
+            Matrix.scaleM(mRotMatrix, 0, layout.scaleX, layout.scaleY, 1.0f);
+            if (mRotationDegrees != 0) {
+                Matrix.rotateM(mRotMatrix, 0, -mRotationDegrees, 0, 0, 1.0f);
+            }
+            if (mDiagnosticDirty) {
+                RenderTargetGeometry.Calculation geometry = RenderTargetGeometry.calculate(
+                        rawTargetWidth, rawTargetHeight, mHostWindowGeometry, effectiveRole);
+                logAspectIfChanged(geometry, layout, null, null);
+                mDiagnosticDirty = false;
+            }
+        } else if (mRotationDegrees != 0) {
             Matrix.rotateM(mRotMatrix, 0, -mRotationDegrees, 0, 0, 1.0f);
         }
 
@@ -341,6 +429,10 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, mTextureId);
 
         GLES20.glUniformMatrix4fv(muSTMatrixHandle, 1, false, mSTMatrix, 0);
+        if (muDynamicTextureMatrixHandle >= 0) {
+            GLES20.glUniformMatrix4fv(muDynamicTextureMatrixHandle, 1, false,
+                    mDynamicTextureMatrix, 0);
+        }
         GLES20.glUniformMatrix4fv(muCropMatrixHandle, 1, false, mCropMatrix, 0);
         GLES20.glUniformMatrix4fv(muRotMatrixHandle, 1, false, mRotMatrix, 0);
 
@@ -364,8 +456,71 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
 
         mFrameCount++;
-        if (mFrameCount % 60 == 1) {
+        if (!ConfigManager.ASPECT_MODE_DYNAMIC.equals(mAspectMode) && mFrameCount % 60 == 1) {
             LogUtil.log("【CS】【GLRenderer】视频渲染工作中: Tag=" + mTag + " | 尺寸=" + mSurfaceWidth + "x" + mSurfaceHeight + " | 旋转=" + mRotationDegrees + "° | 反光强度=" + String.format("%.2f", ambientIntensity) + " | 累计已渲染帧=" + mFrameCount);
+        }
+    }
+
+    private void ensureDynamicGeometry(int rawTargetWidth, int rawTargetHeight,
+            RenderTargetRole role) {
+        if (!mDynamicGeometryDirty && mDynamicGeometry != null
+                && mDynamicGeometry.role == role) {
+            if (mDiagnosticDirty) {
+                logDynamicAspectIfChanged(rawTargetWidth, rawTargetHeight, role);
+                mDiagnosticDirty = false;
+            }
+            return;
+        }
+
+        int requestedWidth = role == RenderTargetRole.PREVIEW && mRequestedWidth > 0
+                ? mRequestedWidth : rawTargetWidth;
+        int requestedHeight = role == RenderTargetRole.PREVIEW && mRequestedHeight > 0
+                ? mRequestedHeight : rawTargetHeight;
+        mDynamicGeometry = VirtualSensorGeometry.calculate(
+                mSourceWidth, mSourceHeight,
+                requestedWidth, requestedHeight, mRotationDegrees,
+                mSourceAnchorU, mSourceAnchorV, mZoom, role);
+        float[] dynamicMatrix = VirtualSensorGeometry.buildDynamicTextureMatrix(mDynamicGeometry);
+        System.arraycopy(dynamicMatrix, 0, mDynamicTextureMatrix, 0,
+                mDynamicTextureMatrix.length);
+        Matrix.setIdentityM(mCropMatrix, 0);
+        Matrix.setIdentityM(mRotMatrix, 0);
+        mDynamicGeometryDirty = false;
+        logDynamicAspectIfChanged(rawTargetWidth, rawTargetHeight, role);
+        mDiagnosticDirty = false;
+    }
+
+    private void logDynamicAspectIfChanged(int rawTargetWidth, int rawTargetHeight,
+            RenderTargetRole role) {
+        VirtualSensorGeometry.Calculation geometry = mDynamicGeometry;
+        if (geometry == null) {
+            return;
+        }
+        HostWindowGeometry.Snapshot host = mHostWindowGeometry;
+        int hostWidth = host == null ? 0 : host.getWidth();
+        int hostHeight = host == null ? 0 : host.getHeight();
+        int displayRotation = host == null
+                ? HostWindowGeometry.UNKNOWN_ROTATION : host.getDisplayRotation();
+        String diagnostic = String.format(Locale.US,
+                "role=%s|renderer=%s|source=%dx%d|rawTarget=%dx%d|host=%dx%d"
+                        + "|logicalTarget=%dx%d|displayRotation=%d|videoRotation=%d|mode=%s"
+                        + "|sourceAspect=%.5f|targetAspect=%.5f|fitScale=%.5f"
+                        + "|baseViewport=%.2fx%.2f|effectiveViewport=%.2fx%.2f"
+                        + "|zoom=%.4f|sourceAnchor=%.5f,%.5f|effectiveAnchor=%.5f,%.5f"
+                        + "|transformFlags=0x%02x"
+                        + "|orientationCompensated=false|hostGeometryAffectsRendering=false",
+                role, mTag, mSourceWidth, mSourceHeight,
+                rawTargetWidth, rawTargetHeight, hostWidth, hostHeight,
+                rawTargetWidth, rawTargetHeight, displayRotation, mRotationDegrees,
+                mAspectMode, geometry.sourceAspect, geometry.targetAspect,
+                geometry.fitScale, geometry.baseViewportWidth, geometry.baseViewportHeight,
+                geometry.viewportWidth, geometry.viewportHeight, geometry.zoom,
+                geometry.sourceAnchorU, geometry.sourceAnchorV,
+                geometry.logicalAnchorU, geometry.logicalAnchorV,
+                mProducerTransformFlags);
+        if (!diagnostic.equals(mLastAspectDiagnostic)) {
+            mLastAspectDiagnostic = diagnostic;
+            LogUtil.log("[VFC][DynamicV2] " + diagnostic);
         }
     }
 
@@ -400,6 +555,8 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
 
                 // 立即恢复旋转
                 mRotationDegrees = savedRotation;
+                mDynamicGeometryDirty = true;
+                mDiagnosticDirty = true;
 
                 int bufSize = width * height * 4;
                 if (mCaptureBuffer == null || mCaptureBufferSize != bufSize) {
@@ -423,6 +580,8 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
                 // 不 swap — 不影响预览 Surface 的显示内容
             } catch (Exception e) {
                 mRotationDegrees = savedRotation;
+                mDynamicGeometryDirty = true;
+                mDiagnosticDirty = true;
                 LogUtil.log("【CS】【GL】captureFrame 失败: " + e);
             }
             latch.countDown();
@@ -518,6 +677,8 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
         maPositionHandle = GLES20.glGetAttribLocation(mProgram, "aPosition");
         maTextureHandle = GLES20.glGetAttribLocation(mProgram, "aTextureCoord");
         muSTMatrixHandle = GLES20.glGetUniformLocation(mProgram, "uSTMatrix");
+        muDynamicTextureMatrixHandle = GLES20.glGetUniformLocation(mProgram,
+                "uDynamicTextureMatrix");
         muCropMatrixHandle = GLES20.glGetUniformLocation(mProgram, "uCropMatrix");
         muRotMatrixHandle = GLES20.glGetUniformLocation(mProgram, "uRotMatrix");
         muAmbientColorHandle = GLES20.glGetUniformLocation(mProgram, "uAmbientColor");

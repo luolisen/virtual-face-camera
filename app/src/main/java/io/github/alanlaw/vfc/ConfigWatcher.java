@@ -27,10 +27,14 @@ public final class ConfigWatcher {
 
         /** A viewport-only change must not restart the media player. */
         void onViewportChanged();
+
+        /** A runtime viewport command is pending for this target process. */
+        void onViewportCommandAvailable();
     }
 
     private final Callback callback;
     private android.database.ContentObserver configObserver;
+    private android.database.ContentObserver runtimeCommandObserver;
     private FileObserver configFileObserver;
 
     public ConfigWatcher(Callback callback) {
@@ -55,6 +59,14 @@ public final class ConfigWatcher {
                 ConfigState oldState = ConfigState.capture(config);
                 config.forceReload();
                 dispatchChanges(config, oldState);
+            }
+        };
+
+        runtimeCommandObserver = new android.database.ContentObserver(new Handler(Looper.getMainLooper())) {
+            @Override
+            public void onChange(boolean selfChange) {
+                super.onChange(selfChange);
+                callback.onViewportCommandAvailable();
             }
         };
 
@@ -95,6 +107,13 @@ public final class ConfigWatcher {
             // Active Config Request via broadcast
             new Handler(Looper.getMainLooper()).postDelayed(() -> VideoManager.getConfig().requestConfig(context),
                     1000);
+        }
+
+        try {
+            context.getContentResolver().registerContentObserver(
+                    IpcContract.URI_RUNTIME_COMMAND, true, runtimeCommandObserver);
+        } catch (Exception e) {
+            LogUtil.log("【CS】注册 runtime viewport observer 失败: " + e);
         }
 
         // BroadcastReceiver for control signals & configuration updates
@@ -221,10 +240,10 @@ public final class ConfigWatcher {
                     ConfigManager.KEY_ACTIVE_BINDING_SHORTCUT, "");
             ConfigManager.Viewport viewport = config.getPresetShortcutViewport(
                     presetId, shortcutKey);
-            return String.format(Locale.US, "%s|%s|%.6f|%.6f|%d",
+            return String.format(Locale.US, "%s|%s|%.6f|%.6f|%.6f|%d",
                     presetId, shortcutKey,
                     viewport.getAnchorU(), viewport.getAnchorV(),
-                    config.getViewportMoveStepPercent());
+                    viewport.getZoom(), config.getViewportMoveStepPercent());
         }
     }
 

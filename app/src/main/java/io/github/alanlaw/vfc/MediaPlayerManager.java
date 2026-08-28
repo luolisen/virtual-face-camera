@@ -416,6 +416,21 @@ public final class MediaPlayerManager {
         applyRenderingConfig(renderer, relay);
     }
 
+    /** Return the latest decoded source dimensions known by any active renderer. */
+    int[] getActiveSourceSize() {
+        GLVideoRenderer[] renderers = {
+                c1_renderer_holder, c1_renderer_texture,
+                c2_renderer, c2_renderer_1,
+                c2_reader_renderer, c2_reader_renderer_1
+        };
+        for (GLVideoRenderer renderer : renderers) {
+            if (renderer != null && renderer.getSourceWidth() > 0 && renderer.getSourceHeight() > 0) {
+                return new int[] { renderer.getSourceWidth(), renderer.getSourceHeight() };
+            }
+        }
+        return new int[] { 0, 0 };
+    }
+
     private void loadRenderingConfig() {
         ConfigManager config = VideoManager.getConfig();
         currentRotationDegrees = normalizeRotation(
@@ -483,6 +498,7 @@ public final class MediaPlayerManager {
         if (relay != null) {
             relay.setSourceSize(width, height);
         }
+        HookMain.processPendingViewportCommandIfReady();
     }
 
     private void bindVideoSizeListener(MediaPlayer player, GLVideoRenderer renderer, SurfaceRelay relay) {

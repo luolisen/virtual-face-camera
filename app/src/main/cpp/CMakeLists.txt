@@ -30,6 +30,18 @@ target_link_libraries(cs_bridge
     android
 )
 
+# Camera1 preview producer-buffer transform bridge. This target is deliberately
+# independent of Dobby and the CameraServer binaries.
+add_library(vfc_surface_bridge SHARED
+    surface_transform_bridge.cpp
+)
+
+target_link_libraries(vfc_surface_bridge
+    log
+    android
+    nativewindow
+)
+
 # CameraServer Native Hook Library (Scheme 2)
 add_library(cs_camserver SHARED
     camserver_hook.cpp
