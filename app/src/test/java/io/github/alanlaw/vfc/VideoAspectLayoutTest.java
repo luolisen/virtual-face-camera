@@ -45,4 +45,24 @@ public class VideoAspectLayoutTest {
         assertEquals(1920, layout.effectiveSourceHeight);
         assertEquals(0.5625f, layout.sourceAspect, EPSILON);
     }
+
+    @Test
+    public void halfTurnKeepsEffectiveSourceDimensions() {
+        VideoAspectLayout.Layout layout = VideoAspectLayout.calculate(
+                1920, 1080, 1920, 1080, 180, ConfigManager.ASPECT_MODE_FIT);
+
+        assertEquals(1920, layout.effectiveSourceWidth);
+        assertEquals(1080, layout.effectiveSourceHeight);
+        assertEquals(1.7777778f, layout.sourceAspect, EPSILON);
+    }
+
+    @Test
+    public void threeQuarterTurnSwapsEffectiveSourceDimensions() {
+        VideoAspectLayout.Layout layout = VideoAspectLayout.calculate(
+                1920, 1080, 1920, 1080, 270, ConfigManager.ASPECT_MODE_FIT);
+
+        assertEquals(1080, layout.effectiveSourceWidth);
+        assertEquals(1920, layout.effectiveSourceHeight);
+        assertEquals(0.5625f, layout.sourceAspect, EPSILON);
+    }
 }

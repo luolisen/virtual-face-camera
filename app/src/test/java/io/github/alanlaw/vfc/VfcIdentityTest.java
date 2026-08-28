@@ -17,10 +17,10 @@ import static org.junit.Assert.assertTrue;
 
 public class VfcIdentityTest {
     @Test
-    public void releaseIdentityIsFixedAtV02() {
+    public void releaseIdentityIsFixedAtV021() {
         assertEquals("io.github.alanlaw.vfc", BuildConfig.APPLICATION_ID);
-        assertEquals("0.2", BuildConfig.VERSION_NAME);
-        assertEquals(2, BuildConfig.VERSION_CODE);
+        assertEquals("0.2.1", BuildConfig.VERSION_NAME);
+        assertEquals(3, BuildConfig.VERSION_CODE);
     }
 
     @Test

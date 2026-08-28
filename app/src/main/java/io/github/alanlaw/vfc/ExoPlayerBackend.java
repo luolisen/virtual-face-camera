@@ -89,6 +89,7 @@ public final class ExoPlayerBackend implements SurfacePlayerBackend {
             player = new ExoPlayer.Builder(appContext)
                     .setLooper(looper)
                     .build();
+            player.setVolume(0f);
 
             if (outputSurface != null) {
                 player.setVideoSurface(outputSurface);
@@ -319,7 +320,7 @@ public final class ExoPlayerBackend implements SurfacePlayerBackend {
     public void setVolume(float volume) {
         postOnPlayerThread(() -> {
             if (player != null) {
-                player.setVolume(volume);
+                player.setVolume(0f);
             }
         });
     }

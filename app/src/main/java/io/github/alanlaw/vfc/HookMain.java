@@ -34,6 +34,7 @@ import io.github.alanlaw.vfc.utils.LogUtil;
 public class HookMain {
     public static final MediaPlayerManager playerManager = new MediaPlayerManager();
     public static final Camera2SessionHook camera2Hook = new Camera2SessionHook(playerManager);
+    private static final HostWindowGeometry hostWindowGeometry = new HostWindowGeometry();
     private static volatile boolean activityLifecycleRegistered = false;
     private final ThreadLocal<Integer> imageReaderNewInstanceHookDepth = new ThreadLocal<Integer>() {
         @Override
@@ -194,9 +195,6 @@ public class HookMain {
         new Camera1Handler().init(packageContext);
         new Camera2Handler().init(packageContext);
 
-        // Initialize Microphone Handler
-        new MicrophoneHandler().init(packageContext);
-
         hookMediaRecorderSetCamera(classLoader, packageName, packageContext);
         hookCallApplicationOnCreate(classLoader, packageName);
         hookImageReaderNewInstance(classLoader);
@@ -256,7 +254,6 @@ public class HookMain {
                                 getConfig().forceReload();
                                 VideoManager.updateVideoPath(false);
                                 initContentObserver(toast_content);
-                                NativeAudioHook.init();
                                 PermissionHelper.checkAndSetupPaths(toast_content, packageName);
                                 LogUtil.log("【CS】后台预热完成：配置与视频路径已就绪 (" + packageName + ")");
                             } catch (Throwable t) {
@@ -294,6 +291,8 @@ public class HookMain {
                     if (activity != null) {
                         String activityName = activity.getClass().getName();
                         camera2Hook.setCurrentActivityClassName(activityName);
+                        HostWindowGeometry.Snapshot geometry = hostWindowGeometry.updateFromActivity(activity);
+                        playerManager.updateHostWindowGeometry(geometry);
                         LogUtil.log("【CS】当前 Activity: " + activityName);
                     }
                 }

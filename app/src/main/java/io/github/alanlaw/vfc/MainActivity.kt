@@ -69,16 +69,6 @@ class MainActivity : ComponentActivity(), App.ServiceStateListener {
             Toast.makeText(this, getString(R.string.config_migrated), Toast.LENGTH_LONG).show()
         }
 
-        // Auto-start service if enabled
-        if (configManager.getBoolean(ConfigManager.KEY_NOTIFICATION_CONTROL_ENABLED, false)) {
-            try {
-                val intent = Intent(this, NotificationService::class.java)
-                startForegroundService(intent)
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-
         if (configManager.getBoolean(ConfigManager.KEY_OVERLAY_CONTROL_ENABLED, false)
             && Settings.canDrawOverlays(this)
         ) {
@@ -238,11 +228,6 @@ class MainActivity : ComponentActivity(), App.ServiceStateListener {
                     }
                 }
                 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                     if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                         requestPermissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
-                     }
-                }
             } else {
                 val permissions = getRequiredPermissions()
                 requestPermissionLauncher.launch(permissions)
@@ -255,12 +240,7 @@ class MainActivity : ComponentActivity(), App.ServiceStateListener {
     private fun hasRequiredPermissions(): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val storageGranted = android.os.Environment.isExternalStorageManager()
-            val notificationGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-            } else {
-                true
-            }
-            return storageGranted && notificationGranted
+            return storageGranted
         } else {
             return getRequiredPermissions().all {
                 ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
@@ -273,9 +253,6 @@ class MainActivity : ComponentActivity(), App.ServiceStateListener {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
             permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
         }
         return permissions.toTypedArray()
     }

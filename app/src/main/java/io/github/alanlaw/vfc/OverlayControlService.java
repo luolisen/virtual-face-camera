@@ -26,6 +26,7 @@ import android.view.ViewConfiguration;
 import android.view.WindowManager;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
 import android.widget.ScrollView;
@@ -40,8 +41,10 @@ public class OverlayControlService extends Service {
     private LinearLayout contentContainer;
     private FrameLayout rootView;
     private LinearLayout actionPanel;
+    private HorizontalScrollView actionScroll;
     private TextView bubbleView;
     private TextView presetButton;
+    private TextView rotationButton;
     private PopupWindow presetPopup;
     private WindowManager.LayoutParams layoutParams;
     private ValueAnimator snapAnimator;
@@ -179,6 +182,29 @@ public class OverlayControlService extends Service {
             }
         }
 
+        actionPanel.addView(makeSpacer());
+        rotationButton = makeActionButton(
+                getString(R.string.overlay_action_rotate),
+                resolveMonetColor(0xFF7D5260),
+                v -> handleRotation());
+        actionPanel.addView(rotationButton);
+
+        actionScroll = new HorizontalScrollView(this);
+        actionScroll.setHorizontalScrollBarEnabled(false);
+        actionScroll.setFillViewport(false);
+        actionScroll.setClipChildren(false);
+        int screenWidth = getResources().getDisplayMetrics().widthPixels;
+        int bubbleSize = dpScaled(45);
+        int availableActionWidth = screenWidth - outerPadding * 2 - bubbleSize
+                - dpScaled(INNER_GAP_DP) - dp(EDGE_MARGIN_DP) * 2;
+        LinearLayout.LayoutParams actionScrollParams = new LinearLayout.LayoutParams(
+                Math.max(1, availableActionWidth), LinearLayout.LayoutParams.WRAP_CONTENT);
+        actionScroll.setLayoutParams(actionScrollParams);
+        actionScroll.addView(actionPanel, new HorizontalScrollView.LayoutParams(
+                HorizontalScrollView.LayoutParams.WRAP_CONTENT,
+                HorizontalScrollView.LayoutParams.WRAP_CONTENT));
+        actionScroll.setVisibility(View.GONE);
+
         bubbleView = new TextView(this);
         bubbleView.setText("VFC");
         bubbleView.setTextColor(resolveOnAccentColor());
@@ -190,7 +216,6 @@ public class OverlayControlService extends Service {
             bubbleView.setElevation(dpScaled(6));
         }
 
-        int bubbleSize = dpScaled(45);
         LinearLayout.LayoutParams bubbleParams = new LinearLayout.LayoutParams(bubbleSize, bubbleSize);
         bubbleView.setLayoutParams(bubbleParams);
         bubbleView.setOnTouchListener(new BubbleTouchListener());
@@ -226,8 +251,10 @@ public class OverlayControlService extends Service {
         contentContainer = null;
         rootView = null;
         actionPanel = null;
+        actionScroll = null;
         bubbleView = null;
         presetButton = null;
+        rotationButton = null;
         for (int i = 0; i < shortcutButtons.length; i++) {
             shortcutButtons[i] = null;
         }
@@ -242,6 +269,9 @@ public class OverlayControlService extends Service {
         }
         if (actionPanel != null) {
             actionPanel.setVisibility(isExpanded ? View.VISIBLE : View.GONE);
+        }
+        if (actionScroll != null) {
+            actionScroll.setVisibility(isExpanded ? View.VISIBLE : View.GONE);
         }
         if (rootView != null) {
             rootView.post(() -> updateOverlayPosition(true));
@@ -302,6 +332,14 @@ public class OverlayControlService extends Service {
             return;
         }
         refreshShortcutButtonStates();
+    }
+
+    private void handleRotation() {
+        int rotation = ControlActionHelper.rotateVideo(this);
+        android.widget.Toast.makeText(
+                this,
+                getString(R.string.overlay_rotation_status, rotation),
+                android.widget.Toast.LENGTH_SHORT).show();
     }
 
     private void refreshShortcutButtonStates() {
@@ -486,20 +524,20 @@ public class OverlayControlService extends Service {
 
         int gap = dpScaled(INNER_GAP_DP);
 
-        if (actionPanel != null && actionPanel.getLayoutParams() instanceof LinearLayout.LayoutParams) {
-            LinearLayout.LayoutParams panelLp = (LinearLayout.LayoutParams) actionPanel.getLayoutParams();
+        if (actionScroll != null && actionScroll.getLayoutParams() instanceof LinearLayout.LayoutParams) {
+            LinearLayout.LayoutParams panelLp = (LinearLayout.LayoutParams) actionScroll.getLayoutParams();
             panelLp.setMargins(0, 0, 0, 0);
             if (snappedToRight) {
                 panelLp.rightMargin = gap;
             } else {
                 panelLp.leftMargin = gap;
             }
-            actionPanel.setLayoutParams(panelLp);
+            actionScroll.setLayoutParams(panelLp);
         }
 
         if (snappedToRight) {
-            if (actionPanel != null) {
-                contentContainer.addView(actionPanel);
+            if (actionScroll != null) {
+                contentContainer.addView(actionScroll);
             }
             if (bubbleView != null) {
                 contentContainer.addView(bubbleView);
@@ -508,8 +546,8 @@ public class OverlayControlService extends Service {
             if (bubbleView != null) {
                 contentContainer.addView(bubbleView);
             }
-            if (actionPanel != null) {
-                contentContainer.addView(actionPanel);
+            if (actionScroll != null) {
+                contentContainer.addView(actionScroll);
             }
         }
     }

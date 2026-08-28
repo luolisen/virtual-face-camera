@@ -32,6 +32,7 @@ import java.util.concurrent.atomic.AtomicReference
 object CameraServerBridge {
 
     private const val TAG = "【CS】【CameraServerBridge】"
+    private const val JNI_BRIDGE_LIBRARY = "cs_bridge"
     private const val CAMSERVER_SO_NAME = "libcs_camserver.so"
     private const val INJECTOR_BIN_NAME = "cs-injector"
     private const val TARGET_TMP_DIR = "/data/local/tmp"
@@ -61,9 +62,9 @@ object CameraServerBridge {
 
     init {
         try {
-            System.loadLibrary("camswap-native-hook")
+            System.loadLibrary(JNI_BRIDGE_LIBRARY)
         } catch (e: Throwable) {
-            LogUtil.log("$TAG 加载 camswap-native-hook 动态库: ${e.message}")
+            LogUtil.log("$TAG 加载 $JNI_BRIDGE_LIBRARY 动态库: ${e.message}")
         }
     }
 

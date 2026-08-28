@@ -22,6 +22,8 @@ public final class MediaPlayerManager {
     private volatile int lastCamera2PlaybackDurationMs;
     private volatile int currentRotationDegrees;
     private volatile String currentAspectMode = ConfigManager.ASPECT_MODE_FIT;
+    private volatile HostWindowGeometry.Snapshot currentHostWindowGeometry =
+            HostWindowGeometry.Snapshot.unavailable();
 
     // ---- Camera1 players (created by Camera1Handler) ----
     MediaPlayer mplayer1;
@@ -105,7 +107,8 @@ public final class MediaPlayerManager {
             c2_reader_player = recreatePlayer(c2_reader_player);
             GLVideoRenderer[] r = { c2_reader_renderer };
             SurfaceRelay[] rr = { c2_reader_relay };
-            setupMediaPlayer(c2_reader_player, r, rr, readerSurface, "c2_reader", false);
+            setupMediaPlayer(c2_reader_player, r, rr, readerSurface, "c2_reader",
+                    RenderTargetRole.READER);
             c2_reader_renderer = r[0];
             c2_reader_relay = rr[0];
             lastC2ReaderSurface = readerSurface;
@@ -114,19 +117,19 @@ public final class MediaPlayerManager {
             c2_reader_player_1 = recreatePlayer(c2_reader_player_1);
             GLVideoRenderer[] r = { c2_reader_renderer_1 };
             SurfaceRelay[] rr = { c2_reader_relay_1 };
-            setupMediaPlayer(c2_reader_player_1, r, rr, readerSurface1, "c2_reader_1", false);
+            setupMediaPlayer(c2_reader_player_1, r, rr, readerSurface1, "c2_reader_1",
+                    RenderTargetRole.READER);
             c2_reader_renderer_1 = r[0];
             c2_reader_relay_1 = rr[0];
             lastC2ReaderSurface1 = readerSurface1;
         }
 
-        boolean playSound = VideoManager.getConfig().getBoolean(ConfigManager.KEY_PLAY_VIDEO_SOUND, false);
-
         if (previewSurface != null && previewSurface != lastC2PreviewSurface) {
             c2_player = recreatePlayer(c2_player);
             GLVideoRenderer[] r = { c2_renderer };
             SurfaceRelay[] rr = { c2_relay };
-            setupMediaPlayer(c2_player, r, rr, previewSurface, "c2_preview", playSound);
+            setupMediaPlayer(c2_player, r, rr, previewSurface, "c2_preview",
+                    RenderTargetRole.PREVIEW);
             c2_renderer = r[0];
             c2_relay = rr[0];
             lastC2PreviewSurface = previewSurface;
@@ -135,7 +138,8 @@ public final class MediaPlayerManager {
             c2_player_1 = recreatePlayer(c2_player_1);
             GLVideoRenderer[] r = { c2_renderer_1 };
             SurfaceRelay[] rr = { c2_relay_1 };
-            setupMediaPlayer(c2_player_1, r, rr, previewSurface1, "c2_preview_1", playSound);
+            setupMediaPlayer(c2_player_1, r, rr, previewSurface1, "c2_preview_1",
+                    RenderTargetRole.PREVIEW);
             c2_renderer_1 = r[0];
             c2_relay_1 = rr[0];
             lastC2PreviewSurface1 = previewSurface1;
@@ -160,25 +164,29 @@ public final class MediaPlayerManager {
         if (readerSurface != null) {
             GLVideoRenderer.releaseSafely(c2_reader_renderer);
             SurfaceRelay.releaseSafely(c2_reader_relay);
-            c2_reader_renderer = GLVideoRenderer.createSafely(readerSurface, "c2_reader_stream");
+            c2_reader_renderer = GLVideoRenderer.createSafely(readerSurface, "c2_reader_stream",
+                    RenderTargetRole.READER);
             configureRenderer(c2_reader_renderer, null);
         }
         if (readerSurface1 != null) {
             GLVideoRenderer.releaseSafely(c2_reader_renderer_1);
             SurfaceRelay.releaseSafely(c2_reader_relay_1);
-            c2_reader_renderer_1 = GLVideoRenderer.createSafely(readerSurface1, "c2_reader_1_stream");
+            c2_reader_renderer_1 = GLVideoRenderer.createSafely(readerSurface1, "c2_reader_1_stream",
+                    RenderTargetRole.READER);
             configureRenderer(c2_reader_renderer_1, null);
         }
         if (previewSurface != null) {
             GLVideoRenderer.releaseSafely(c2_renderer);
             SurfaceRelay.releaseSafely(c2_relay);
-            c2_renderer = GLVideoRenderer.createSafely(previewSurface, "c2_preview_stream");
+            c2_renderer = GLVideoRenderer.createSafely(previewSurface, "c2_preview_stream",
+                    RenderTargetRole.PREVIEW);
             configureRenderer(c2_renderer, null);
         }
         if (previewSurface1 != null) {
             GLVideoRenderer.releaseSafely(c2_renderer_1);
             SurfaceRelay.releaseSafely(c2_relay_1);
-            c2_renderer_1 = GLVideoRenderer.createSafely(previewSurface1, "c2_preview_1_stream");
+            c2_renderer_1 = GLVideoRenderer.createSafely(previewSurface1, "c2_preview_1_stream",
+                    RenderTargetRole.PREVIEW);
             configureRenderer(c2_renderer_1, null);
         }
 
@@ -193,8 +201,7 @@ public final class MediaPlayerManager {
                 backendSurface = primaryTarget;
             }
             streamBackend.setOutputSurface(backendSurface);
-            streamBackend.setVolume(VideoManager.getConfig().getBoolean(
-                    ConfigManager.KEY_PLAY_VIDEO_SOUND, false) ? 1.0f : 0f);
+            streamBackend.setVolume(0f);
             streamBackend.setLooping(false); // streams don't loop
             streamBackend.setListener(new SurfacePlayerBackend.Listener() {
                 @Override
@@ -346,6 +353,7 @@ public final class MediaPlayerManager {
             if (player.isPlaying())
                 player.stop();
             player.reset();
+            player.setVolume(0f, 0f);
             if (renderer != null && renderer.isInitialized()) {
                 player.setSurface(renderer.getInputSurface());
             }
@@ -380,6 +388,14 @@ public final class MediaPlayerManager {
         currentAspectMode = normalizeAspectMode(aspectMode);
         applyRenderingConfigToAllRenderers();
         LogUtil.log("【CS】画面适配已实时应用: " + currentAspectMode);
+    }
+
+    /** Apply the latest resumed host window geometry to preview renderers. */
+    void updateHostWindowGeometry(HostWindowGeometry.Snapshot geometry) {
+        currentHostWindowGeometry = geometry == null
+                ? HostWindowGeometry.Snapshot.unavailable()
+                : geometry;
+        applyRenderingConfigToAllRenderers();
     }
 
     /** Configure a renderer created by the legacy Camera1 handler. */
@@ -419,10 +435,12 @@ public final class MediaPlayerManager {
         if (renderer != null) {
             renderer.setRotation(currentRotationDegrees);
             renderer.setAspectMode(currentAspectMode);
+            renderer.setHostWindowGeometry(currentHostWindowGeometry);
         }
         if (relay != null) {
             relay.setRotation(currentRotationDegrees);
             relay.setAspectMode(currentAspectMode);
+            relay.setHostWindowGeometry(currentHostWindowGeometry);
         }
     }
 
@@ -526,14 +544,13 @@ public final class MediaPlayerManager {
     // =====================================================================
 
     private void setupMediaPlayer(MediaPlayer player, GLVideoRenderer[] rendererRef,
-            SurfaceRelay[] relayRef, Surface targetSurface, String tag, boolean playSound) {
+            SurfaceRelay[] relayRef, Surface targetSurface, String tag, RenderTargetRole role) {
         if (targetSurface == null)
             return;
         GLVideoRenderer.releaseSafely(rendererRef[0]);
         SurfaceRelay.releaseSafely(relayRef[0]);
-        rendererRef[0] = GLVideoRenderer.createSafely(targetSurface, tag);
-        if (!playSound)
-            player.setVolume(0, 0);
+        rendererRef[0] = GLVideoRenderer.createSafely(targetSurface, tag, role);
+        player.setVolume(0f, 0f);
         player.setLooping(true);
         try {
             if (rendererRef[0] != null) {
@@ -542,7 +559,7 @@ public final class MediaPlayerManager {
                 LogUtil.log("【CS】【GL】" + tag + " 使用 GL 渲染器 (旋转:" + currentRotationDegrees + "°)");
             } else {
                 LogUtil.log("【CS】【Relay】" + tag + " GL 失败，尝试 SurfaceTexture 中继");
-                relayRef[0] = SurfaceRelay.createSafely(targetSurface, tag);
+                relayRef[0] = SurfaceRelay.createSafely(targetSurface, tag, role);
                 if (relayRef[0] != null) {
                     player.setSurface(relayRef[0].getInputSurface());
                     configureRenderer(null, relayRef[0]);

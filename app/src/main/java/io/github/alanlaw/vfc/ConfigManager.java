@@ -787,11 +787,31 @@ public class ConfigManager {
         }
     }
 
+    /** Force the removed notification-control feature off for upgraded configs. */
+    public boolean enforceNotificationControlDisabled() {
+        synchronized (configWriteLock) {
+            JSONObject current = getConfigSnapshot();
+            if (!current.optBoolean(KEY_NOTIFICATION_CONTROL_ENABLED, false)) {
+                return false;
+            }
+            JSONObject updated = copyConfig(current);
+            try {
+                updated.put(KEY_NOTIFICATION_CONTROL_ENABLED, false);
+                setConfigSnapshot(updated);
+                save(updated);
+                return true;
+            } catch (JSONException e) {
+                return false;
+            }
+        }
+    }
+
     /** Apply all v0.2 one-time compatibility changes through one public entry point. */
     public boolean migrateV02Configuration() {
         boolean presetMigrated = migrateLegacyShortcutBindingsIfNeeded();
         boolean audioChanged = enforceAudioFeaturesDisabled();
-        return presetMigrated || audioChanged;
+        boolean notificationChanged = enforceNotificationControlDisabled();
+        return presetMigrated || audioChanged || notificationChanged;
     }
 
     private boolean updatePresetBinding(String presetId, String shortcutKey, String videoName) {

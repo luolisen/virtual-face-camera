@@ -18,7 +18,6 @@ public final class AndroidMediaPlayerBackend implements SurfacePlayerBackend {
     private Surface outputSurface;
     private Listener listener;
     private boolean looping = true;
-    private float volume = 0f;
     private MediaSourceDescriptor currentSource;
 
     public AndroidMediaPlayerBackend() {
@@ -39,7 +38,7 @@ public final class AndroidMediaPlayerBackend implements SurfacePlayerBackend {
         try {
             player.reset();
             player.setLooping(looping);
-            player.setVolume(volume, volume);
+            player.setVolume(0f, 0f);
 
             // Data source: prefer Provider PFD, fallback to file path
             if (source.useProviderPfd) {
@@ -158,9 +157,8 @@ public final class AndroidMediaPlayerBackend implements SurfacePlayerBackend {
 
     @Override
     public void setVolume(float volume) {
-        this.volume = volume;
         if (player != null) {
-            player.setVolume(volume, volume);
+            player.setVolume(0f, 0f);
         }
     }
 

@@ -7,6 +7,7 @@ import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class ConfigManagerJvmTest {
@@ -26,6 +27,8 @@ public class ConfigManagerJvmTest {
             assertEquals(ConfigManager.REPLACE_MODE_IMAGE,
                     configManager.getString(ConfigManager.KEY_REPLACE_MODE, ConfigManager.REPLACE_MODE_VIDEO));
             assertTrue(configManager.getBoolean(ConfigManager.KEY_NOTIFICATION_CONTROL_ENABLED, false));
+            configManager.migrateV02Configuration();
+            assertFalse(configManager.getBoolean(ConfigManager.KEY_NOTIFICATION_CONTROL_ENABLED, false));
         }
     }
 

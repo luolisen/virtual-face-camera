@@ -18,6 +18,7 @@ import io.github.alanlaw.vfc.utils.LogUtil;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
+import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -58,8 +59,11 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
     private volatile int mSourceWidth = 0;
     private volatile int mSourceHeight = 0;
     private volatile String mAspectMode = ConfigManager.ASPECT_MODE_FIT;
+    private final RenderTargetRole mRenderTargetRole;
+    private volatile HostWindowGeometry.Snapshot mHostWindowGeometry = HostWindowGeometry.Snapshot.unavailable();
     private volatile boolean mReleased = false;
     private boolean mInitialized = false;
+    private String mLastAspectDiagnostic;
 
     // Thread
     private HandlerThread mGLThread;
@@ -75,7 +79,12 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
     // Shader sources, vertices, and tex coords shared via GLHelper
 
     public SurfaceRelay(Surface targetSurface, String tag) {
+        this(targetSurface, tag, RenderTargetRole.PREVIEW);
+    }
+
+    public SurfaceRelay(Surface targetSurface, String tag, RenderTargetRole role) {
         mTag = tag;
+        mRenderTargetRole = role == null ? RenderTargetRole.PREVIEW : role;
         mTargetSurface = targetSurface;
         Matrix.setIdentityM(mRotMatrix, 0);
         Matrix.setIdentityM(mSTMatrix, 0);
@@ -132,6 +141,12 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
                 : ConfigManager.ASPECT_MODE_FIT;
     }
 
+    public void setHostWindowGeometry(HostWindowGeometry.Snapshot geometry) {
+        mHostWindowGeometry = geometry == null
+                ? HostWindowGeometry.Snapshot.unavailable()
+                : geometry;
+    }
+
     @Override
     public void onFrameAvailable(SurfaceTexture surfaceTexture) {
         if (mReleased || !mInitialized)
@@ -181,14 +196,19 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
                 GLES20.glViewport(0, 0, surfaceWidth[0], surfaceHeight[0]);
             }
 
+            RenderTargetGeometry.Calculation geometry = RenderTargetGeometry.calculate(
+                    surfaceWidth[0], surfaceHeight[0], mHostWindowGeometry, mRenderTargetRole);
+            VideoAspectLayout.Layout layout = VideoAspectLayout.calculate(
+                    mSourceWidth, mSourceHeight,
+                    geometry.logicalTargetWidth, geometry.logicalTargetHeight,
+                    mRotationDegrees, mAspectMode);
+
             Matrix.setIdentityM(mRotMatrix, 0);
             if (surfaceWidth[0] > 0 && surfaceHeight[0] > 0
                     && mSourceWidth > 0 && mSourceHeight > 0) {
-                VideoAspectLayout.Layout layout = VideoAspectLayout.calculate(
-                        mSourceWidth, mSourceHeight, surfaceWidth[0], surfaceHeight[0],
-                        mRotationDegrees, mAspectMode);
                 Matrix.scaleM(mRotMatrix, 0, layout.scaleX, layout.scaleY, 1.0f);
             }
+            logAspectIfChanged(geometry, layout);
             if (mRotationDegrees != 0) {
                 Matrix.rotateM(mRotMatrix, 0, -mRotationDegrees, 0, 0, 1.0f);
             }
@@ -374,11 +394,37 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
         }
     }
 
+    private void logAspectIfChanged(RenderTargetGeometry.Calculation geometry,
+            VideoAspectLayout.Layout layout) {
+        String diagnostic = String.format(Locale.US,
+                "role=%s|source=%dx%d|rawTarget=%dx%d|host=%dx%d|logicalTarget=%dx%d"
+                        + "|displayRotation=%d|videoRotation=%d|mode=%s|sourceAspect=%.5f"
+                        + "|targetAspect=%.5f|scaleX=%.5f|scaleY=%.5f|orientationCompensated=%s",
+                geometry.role,
+                mSourceWidth, mSourceHeight,
+                geometry.rawTargetWidth, geometry.rawTargetHeight,
+                geometry.hostWidth, geometry.hostHeight,
+                geometry.logicalTargetWidth, geometry.logicalTargetHeight,
+                geometry.displayRotation, mRotationDegrees, mAspectMode,
+                layout.sourceAspect, layout.targetAspect,
+                layout.scaleX, layout.scaleY,
+                geometry.orientationCompensated);
+        if (!diagnostic.equals(mLastAspectDiagnostic)) {
+            mLastAspectDiagnostic = diagnostic;
+            LogUtil.log("[VFC][Aspect] " + diagnostic);
+        }
+    }
+
     public static SurfaceRelay createSafely(Surface targetSurface, String tag) {
+        return createSafely(targetSurface, tag, RenderTargetRole.PREVIEW);
+    }
+
+    public static SurfaceRelay createSafely(Surface targetSurface, String tag,
+            RenderTargetRole role) {
         if (targetSurface == null || !targetSurface.isValid())
             return null;
         try {
-            SurfaceRelay relay = new SurfaceRelay(targetSurface, tag);
+            SurfaceRelay relay = new SurfaceRelay(targetSurface, tag, role);
             if (relay.isInitialized())
                 return relay;
             relay.release();

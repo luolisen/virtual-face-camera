@@ -10,8 +10,6 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Forum
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
@@ -69,7 +67,6 @@ fun HomeScreen(
             isWorking = isWorking,
             isRandomPlay = mainUiState.enableRandomPlay,
             mediaSourceName = displayMediaName,
-            notificationControlEnabled = mainUiState.notificationControlEnabled,
             onPermissionRequest = onPermissionRequest
         )
 
@@ -158,7 +155,6 @@ fun StatusCard(
     isWorking: Boolean,
     isRandomPlay: Boolean,
     mediaSourceName: String?,
-    notificationControlEnabled: Boolean,
     isImageMode: Boolean = false, // Deprecated, always false
     onPermissionRequest: () -> Unit
 ) {
@@ -299,16 +295,6 @@ fun StatusCard(
                     tint = textColor
                 )
 
-                // 3. 通知栏控制
-                StatusRow(
-                    icon = if (notificationControlEnabled) Icons.Default.Notifications
-                           else Icons.Default.NotificationsOff,
-                    label = stringResource(R.string.status_label_notification),
-                    value = if (notificationControlEnabled) stringResource(R.string.status_value_on)
-                            else stringResource(R.string.status_value_off),
-                    tint = textColor,
-                    isLast = true
-                )
             }
         }
     }

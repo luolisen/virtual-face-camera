@@ -156,23 +156,6 @@ public class VideoProvider extends ContentProvider {
             return openAudioFile();
         }
 
-        // Try to start service if enabled (Lazy load when video is accessed)
-        if (configManager.getBoolean(ConfigManager.KEY_NOTIFICATION_CONTROL_ENABLED, false)) {
-            try {
-                android.content.Context context = getContext();
-                if (context != null) {
-                    android.content.Intent intent = new android.content.Intent(context, NotificationService.class);
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                        context.startForegroundService(intent);
-                    } else {
-                        context.startService(intent);
-                    }
-                }
-            } catch (Exception e) {
-                Log.w("VideoProvider", "Failed to start NotificationService: " + e.getMessage());
-            }
-        }
-
         // Random play is handled ONLY via call("random"), not on every openFile access.
         // This prevents the video from constantly switching during playback.
 

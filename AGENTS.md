@@ -26,7 +26,7 @@
 - `Camera1Handler` and `Camera2Handler` install camera hooks; `Camera2SessionHook` manages Camera2 session redirection.
 - `MediaPlayerManager`, `GLVideoRenderer`, and `SurfaceRelay` own playback and rendering lifecycles for fake preview output.
 - `ScreenColorDetector` provides dynamic ambient screen color flash detection and GL injection for liveness defense.
-- `MicrophoneHandler` handles Java-side audio interception; `NativeAudioHook` bridges to JNI for OpenSL ES and AAudio interception.
+- Audio replacement hooks were removed in v0.2.1; video playback remains muted.
 - `ConfigManager` is the configuration core (ContentProvider first, file fallback); `ConfigWatcher` keeps runtime state fresh.
 - `VideoProvider` and `ConfigReceiver` support cross-process config and media delivery.
 - `CameraServerBridge`, `cs_camserver` (native so), and `cs-injector` (root binary) provide the Scheme 2 bottom-layer CameraServer injection pipeline.
@@ -61,7 +61,7 @@
 ## Important gotchas
 - JDK requirement: Use **JDK 17**. Newer preview JDKs may fail on Gradle daemon compatibility.
 - The native build depends on the Dobby submodule at `app/src/main/cpp/third_party/Dobby`. If missing, run `git submodule update --init --recursive`.
-- Native CMake targets include `camswap-native-hook` (OpenSL/AAudio), `cs_camserver` (CameraServer hook), and `cs-injector` (root binary).
+- Native CMake targets include `cs_bridge` (CameraServer JNI shared-memory bridge), `cs_camserver` (CameraServer hook), and `cs-injector` (root binary).
 - In Android Bionic NDK, shared memory mapping must use standard POSIX `open()` and `mmap()`, not `shm_open()`.
 - `MainActivity.isModuleActive()` intentionally returns `false`; Xposed hooks it to return `true` at runtime for self-checks. Do not hardcode `true`.
 - Runtime logs use `LogUtil` and standard UTF-8 Chinese tags (`【CS】...`). Keep existing logging style.

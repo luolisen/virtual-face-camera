@@ -209,7 +209,8 @@ public class Camera1Handler implements ICameraHandler {
             return;
         }
         GLVideoRenderer.releaseSafely(HookMain.playerManager.c1_renderer_holder);
-        GLVideoRenderer renderer = GLVideoRenderer.createSafely(HookMain.ori_holder.getSurface(), "c1_holder");
+        GLVideoRenderer renderer = GLVideoRenderer.createSafely(HookMain.ori_holder.getSurface(), "c1_holder",
+                RenderTargetRole.PREVIEW);
         HookMain.playerManager.c1_renderer_holder = renderer;
         if (renderer != null && renderer.isInitialized()) {
             HookMain.playerManager.mplayer1.setSurface(renderer.getInputSurface());
@@ -219,13 +220,8 @@ public class Camera1Handler implements ICameraHandler {
         } else {
             HookMain.playerManager.mplayer1.setSurface(HookMain.ori_holder.getSurface());
         }
-        boolean playSound = VideoManager.getConfig().getBoolean(ConfigManager.KEY_PLAY_VIDEO_SOUND, false);
-        if (!(playSound && (!HookMain.is_someone_playing))) {
-            HookMain.playerManager.mplayer1.setVolume(0, 0);
-            HookMain.is_someone_playing = false;
-        } else {
-            HookMain.is_someone_playing = true;
-        }
+        HookMain.playerManager.mplayer1.setVolume(0f, 0f);
+        HookMain.is_someone_playing = false;
         HookMain.playerManager.mplayer1.setLooping(true);
         HookMain.playerManager.mplayer1.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
             @Override
@@ -264,7 +260,8 @@ public class Camera1Handler implements ICameraHandler {
         }
 
         GLVideoRenderer.releaseSafely(HookMain.playerManager.c1_renderer_texture);
-        GLVideoRenderer renderer = GLVideoRenderer.createSafely(HookMain.mSurface, "c1_texture");
+        GLVideoRenderer renderer = GLVideoRenderer.createSafely(HookMain.mSurface, "c1_texture",
+                RenderTargetRole.PREVIEW);
         HookMain.playerManager.c1_renderer_texture = renderer;
         if (renderer != null && renderer.isInitialized()) {
             HookMain.playerManager.mMediaPlayer.setSurface(renderer.getInputSurface());
@@ -275,13 +272,8 @@ public class Camera1Handler implements ICameraHandler {
             HookMain.playerManager.mMediaPlayer.setSurface(HookMain.mSurface);
         }
 
-        boolean playSound = VideoManager.getConfig().getBoolean(ConfigManager.KEY_PLAY_VIDEO_SOUND, false);
-        if (!(playSound && (!HookMain.is_someone_playing))) {
-            HookMain.playerManager.mMediaPlayer.setVolume(0, 0);
-            HookMain.is_someone_playing = false;
-        } else {
-            HookMain.is_someone_playing = true;
-        }
+        HookMain.playerManager.mMediaPlayer.setVolume(0f, 0f);
+        HookMain.is_someone_playing = false;
         HookMain.playerManager.mMediaPlayer.setLooping(true);
         HookMain.playerManager.mMediaPlayer.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
             @Override

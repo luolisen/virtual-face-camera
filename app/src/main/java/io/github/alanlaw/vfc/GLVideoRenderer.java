@@ -18,6 +18,7 @@ import io.github.alanlaw.vfc.utils.LogUtil;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
+import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import android.graphics.Bitmap;
@@ -65,6 +66,8 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
     private volatile int mSourceWidth = 0;
     private volatile int mSourceHeight = 0;
     private volatile String mAspectMode = ConfigManager.ASPECT_MODE_FIT;
+    private final RenderTargetRole mRenderTargetRole;
+    private volatile HostWindowGeometry.Snapshot mHostWindowGeometry = HostWindowGeometry.Snapshot.unavailable();
     private volatile boolean mReleased = false;
     private boolean mInitialized = false;
     private volatile int mSurfaceWidth = 0;
@@ -85,6 +88,7 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
     // Reusable capture buffer (avoid per-frame allocation)
     private ByteBuffer mCaptureBuffer;
     private int mCaptureBufferSize;
+    private String mLastAspectDiagnostic;
 
     // Shader sources, vertices, and tex coords shared via GLHelper
 
@@ -95,7 +99,13 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
      * @param tag           日志标识
      */
     public GLVideoRenderer(Surface targetSurface, String tag) {
+        this(targetSurface, tag, RenderTargetRole.PREVIEW);
+    }
+
+    /** Create a renderer with an explicit consumer geometry role. */
+    public GLVideoRenderer(Surface targetSurface, String tag, RenderTargetRole role) {
         mTag = tag;
+        mRenderTargetRole = role == null ? RenderTargetRole.PREVIEW : role;
         mTargetSurface = targetSurface;
         Matrix.setIdentityM(mRotMatrix, 0);
         Matrix.setIdentityM(mSTMatrix, 0);
@@ -184,6 +194,17 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
         return mAspectMode;
     }
 
+    public RenderTargetRole getRenderTargetRole() {
+        return mRenderTargetRole;
+    }
+
+    /** Update the latest resumed host window geometry used by PREVIEW aspect math. */
+    public void setHostWindowGeometry(HostWindowGeometry.Snapshot geometry) {
+        mHostWindowGeometry = geometry == null
+                ? HostWindowGeometry.Snapshot.unavailable()
+                : geometry;
+    }
+
     @Override
     public void onFrameAvailable(SurfaceTexture surfaceTexture) {
         if (mReleased || !mInitialized)
@@ -201,7 +222,7 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
             return;
         }
         try {
-            renderToBackBuffer();
+            renderToBackBuffer(mRenderTargetRole);
             if (!EGL14.eglSwapBuffers(mEGLDisplay, mEGLSurface)) {
                 int err = EGL14.eglGetError();
                 LogUtil.log("【CS】【GL】" + mTag + " eglSwapBuffers 失败, err=" + err);
@@ -218,7 +239,7 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
      * 渲染一帧到后缓冲（不调用 eglSwapBuffers）。
      * drawFrame() 和 captureFrameRaw() 共用此方法。
      */
-    private void renderToBackBuffer() {
+    private void renderToBackBuffer(RenderTargetRole renderTargetRole) {
         if (!EGL14.eglMakeCurrent(mEGLDisplay, mEGLSurface, mEGLSurface, mEGLContext)) {
             return;
         }
@@ -247,12 +268,16 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
         // swaps the effective source dimensions before calculating FIT/CROP.
         // The black clear above supplies FIT letterboxing.
         Matrix.setIdentityM(mRotMatrix, 0);
+        RenderTargetGeometry.Calculation geometry = RenderTargetGeometry.calculate(
+                width[0], height[0], mHostWindowGeometry, renderTargetRole);
+        VideoAspectLayout.Layout layout = VideoAspectLayout.calculate(
+                mSourceWidth, mSourceHeight,
+                geometry.logicalTargetWidth, geometry.logicalTargetHeight,
+                mRotationDegrees, mAspectMode);
         if (width[0] > 0 && height[0] > 0 && mSourceWidth > 0 && mSourceHeight > 0) {
-            VideoAspectLayout.Layout layout = VideoAspectLayout.calculate(
-                    mSourceWidth, mSourceHeight, width[0], height[0],
-                    mRotationDegrees, mAspectMode);
             Matrix.scaleM(mRotMatrix, 0, layout.scaleX, layout.scaleY, 1.0f);
         }
+        logAspectIfChanged(geometry, layout);
         if (mRotationDegrees != 0) {
             Matrix.rotateM(mRotMatrix, 0, -mRotationDegrees, 0, 0, 1.0f);
         }
@@ -320,7 +345,7 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
                 }
 
                 // 渲染到后缓冲（不 swap，不影响预览显示）
-                renderToBackBuffer();
+                renderToBackBuffer(RenderTargetRole.CAPTURE);
 
                 // 立即恢复旋转
                 mRotationDegrees = savedRotation;
@@ -535,18 +560,44 @@ public class GLVideoRenderer implements SurfaceTexture.OnFrameAvailableListener 
         }
     }
 
+    private void logAspectIfChanged(RenderTargetGeometry.Calculation geometry,
+            VideoAspectLayout.Layout layout) {
+        String diagnostic = String.format(Locale.US,
+                "role=%s|source=%dx%d|rawTarget=%dx%d|host=%dx%d|logicalTarget=%dx%d"
+                        + "|displayRotation=%d|videoRotation=%d|mode=%s|sourceAspect=%.5f"
+                        + "|targetAspect=%.5f|scaleX=%.5f|scaleY=%.5f|orientationCompensated=%s",
+                geometry.role,
+                mSourceWidth, mSourceHeight,
+                geometry.rawTargetWidth, geometry.rawTargetHeight,
+                geometry.hostWidth, geometry.hostHeight,
+                geometry.logicalTargetWidth, geometry.logicalTargetHeight,
+                geometry.displayRotation, mRotationDegrees, mAspectMode,
+                layout.sourceAspect, layout.targetAspect,
+                layout.scaleX, layout.scaleY,
+                geometry.orientationCompensated);
+        if (!diagnostic.equals(mLastAspectDiagnostic)) {
+            mLastAspectDiagnostic = diagnostic;
+            LogUtil.log("[VFC][Aspect] " + diagnostic);
+        }
+    }
+
     // ---- Static helpers for managing multiple renderers ----
 
     /**
      * 安全创建渲染器，失败时返回 null 而非抛异常。
      */
     public static GLVideoRenderer createSafely(Surface targetSurface, String tag) {
+        return createSafely(targetSurface, tag, RenderTargetRole.PREVIEW);
+    }
+
+    public static GLVideoRenderer createSafely(Surface targetSurface, String tag,
+            RenderTargetRole role) {
         if (targetSurface == null || !targetSurface.isValid()) {
             LogUtil.log("【CS】【GL】" + tag + " 目标 Surface 无效，跳过创建");
             return null;
         }
         try {
-            GLVideoRenderer renderer = new GLVideoRenderer(targetSurface, tag);
+            GLVideoRenderer renderer = new GLVideoRenderer(targetSurface, tag, role);
             if (renderer.isInitialized()) {
                 return renderer;
             } else {

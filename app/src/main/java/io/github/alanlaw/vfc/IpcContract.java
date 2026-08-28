@@ -16,14 +16,6 @@ public final class IpcContract {
 
     public static final String ACTION_UPDATE_CONFIG = "io.github.alanlaw.vfc.ACTION_UPDATE_CONFIG";
     public static final String ACTION_REQUEST_CONFIG = "io.github.alanlaw.vfc.ACTION_REQUEST_CONFIG";
-    public static final String ACTION_NEXT = "io.github.alanlaw.vfc.ACTION_CAMSWAP_NEXT";
-    public static final String ACTION_ROTATE = "io.github.alanlaw.vfc.ACTION_CAMSWAP_ROTATE";
-    public static final String ACTION_EXIT = "io.github.alanlaw.vfc.ACTION_CAMSWAP_EXIT";
-    public static final String ACTION_NOTIFICATION_PREV = "io.github.alanlaw.vfc.action.PREV_INTERNAL";
-    public static final String ACTION_NOTIFICATION_NEXT = "io.github.alanlaw.vfc.action.NEXT_INTERNAL";
-    public static final String ACTION_NOTIFICATION_ROTATE = "io.github.alanlaw.vfc.action.ROTATE_INTERNAL";
-    public static final String ACTION_NOTIFICATION_EXIT = "io.github.alanlaw.vfc.action.EXIT_INTERNAL";
-
     public static final String EXTRA_CONFIG_JSON = "config_json";
     public static final String EXTRA_REQUESTER_PACKAGE = "requester_package";
     public static final String EXTRA_VIDEO_BUNDLE = "video_bundle";

@@ -30,7 +30,6 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shuffle
@@ -182,25 +181,6 @@ fun SettingsScreen(viewModel: MainViewModel) {
 
         // ==================== General Settings ====================
         SettingsSection(title = stringResource(R.string.settings_category_general)) {
-
-            SettingsSwitchRow(
-                    icon = Icons.Default.NotificationsActive,
-                    title = stringResource(R.string.settings_notification_control),
-                    subtitle = stringResource(R.string.settings_notification_control_desc),
-                    checked = uiState.notificationControlEnabled,
-                    onCheckedChange = {
-                        viewModel.setNotificationControlEnabled(it)
-                        val intent =
-                                Intent(context, io.github.alanlaw.vfc.NotificationService::class.java)
-                        if (it) {
-                            context.startForegroundService(intent)
-                        } else {
-                            context.stopService(intent)
-                        }
-                    }
-            )
-
-            SettingsDivider()
 
             SettingsSwitchRow(
                     icon = Icons.Default.Videocam,

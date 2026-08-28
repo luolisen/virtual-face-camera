@@ -36,7 +36,6 @@ data class MainUiState(
     val presets: List<PresetUiState> = emptyList(),
     val currentPresetId: String? = null,
 
-    val notificationControlEnabled: Boolean = false,
     val overlayControlEnabled: Boolean = false,
     val hasPermission: Boolean = false,
     val isXposedActive: Boolean = false,
@@ -89,7 +88,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         ConfigManager.KEY_VIDEO_ASPECT_MODE, ConfigManager.ASPECT_MODE_FIT),
                     presets = presetState.first,
                     currentPresetId = presetState.second,
-                    notificationControlEnabled = configManager.getBoolean(ConfigManager.KEY_NOTIFICATION_CONTROL_ENABLED, false),
                     overlayControlEnabled = configManager.getBoolean(ConfigManager.KEY_OVERLAY_CONTROL_ENABLED, false),
                     targetAppsCount = configManager.targetPackages.size,
                     originalVideoName = configManager.getString(ConfigManager.KEY_ORIGINAL_VIDEO_NAME, null),
@@ -150,13 +148,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             configManager.setBoolean(ConfigManager.KEY_ENABLE_PHOTO_FAKE, enabled)
             _uiState.update { it.copy(enablePhotoFake = enabled) }
-        }
-    }
-
-    fun setNotificationControlEnabled(enabled: Boolean) {
-        viewModelScope.launch(Dispatchers.IO) {
-            configManager.setBoolean(ConfigManager.KEY_NOTIFICATION_CONTROL_ENABLED, enabled)
-            _uiState.update { it.copy(notificationControlEnabled = enabled) }
         }
     }
 

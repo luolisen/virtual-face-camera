@@ -1,13 +1,13 @@
 # Virtual Face Camera
 
-Virtual Face Camera 0.2 是基于 [Android CamSwap](https://github.com/zensu357/Android-CamSwap-OpenSource) 开发的 Android Xposed/LSPosed 虚拟摄像头模块，准确基线为上游 `v2.8`。本项目保留上游 GPL-3.0 许可证和版权信息，并感谢 [android_virtual_cam](https://github.com/w2016561536/android_virtual_cam) 的代码与思路启发。
+Virtual Face Camera 0.2.1 是基于 [Android CamSwap](https://github.com/zensu357/Android-CamSwap-OpenSource) 开发的 Android Xposed/LSPosed 虚拟摄像头模块，准确基线为上游 `v2.8`。本项目保留上游 GPL-3.0 许可证和版权信息，并感谢 [android_virtual_cam](https://github.com/w2016561536/android_virtual_cam) 的代码与思路启发。
 
 项目仓库：[luolisen/virtual-face-camera](https://github.com/luolisen/virtual-face-camera)
 
 ## 身份
 
 - 应用名称：Virtual Face Camera
-- 版本：`0.2`（`versionCode 2`）
+- 版本：`0.2.1`（`versionCode 3`）
 - package / namespace：`io.github.alanlaw.vfc`
 - Provider authority：`io.github.alanlaw.vfc.provider`
 
@@ -22,6 +22,8 @@ Virtual Face Camera 0.2 是基于 [Android CamSwap](https://github.com/zensu357/
 - App 内创建、重命名、删除和切换当前预设
 - 通过 Android 系统媒体选择器导入并直接绑定视频
 - 悬浮窗附近切换当前预设，固定五键热切换
+- 预览按宿主窗口方向进行 FIT/CROP 适配，保留真实 Camera buffer 尺寸
+- 悬浮窗提供实时旋转控制
 
 固定快捷键顺序：
 
@@ -43,6 +45,8 @@ Virtual Face Camera 0.2 是基于 [Android CamSwap](https://github.com/zensu357/
 ```bash
 ./gradlew assembleRelease
 ```
+
+0.2.1 更新：修复横向 Camera buffer 在竖屏预览中的比例适配；移除废弃的 Java/native 麦克风 Hook；移除通知栏控制；将旋转控制迁移到悬浮窗，并提升复杂媒体应用的兼容性。
 
 Release 必须使用本机正式签名配置。签名 keystore 和密码不属于仓库内容；请在本机 `local.properties` 配置 `storeFile`、`storePassword`、`keyAlias`、`keyPassword`，不要把密码提交或分享。
 

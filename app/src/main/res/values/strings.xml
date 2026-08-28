@@ -25,7 +25,6 @@
     <string name="status_paused">已暂停</string>
     <string name="status_label_video">视频源</string>
     <string name="status_label_play_mode">播放模式</string>
-    <string name="status_label_notification">通知控制</string>
     <string name="status_label_target_apps">目标应用</string>
     <string name="status_value_on">开启</string>
     <string name="status_value_off">关闭</string>
@@ -59,8 +58,6 @@
     <!-- Settings Screen -->
     <string name="settings_category_mode">模式切换</string>
     <string name="settings_category_general">常规设置</string>
-    <string name="settings_notification_control">启用通知栏控制</string>
-    <string name="settings_notification_control_desc">在通知栏快速切换视频</string>
     <string name="settings_overlay_control">启用悬浮窗控制</string>
     <string name="settings_overlay_control_desc">显示可拖动悬浮球，展开后使用五个固定快捷键切换视频</string>
     <string name="settings_overlay_permission_desc">需要授予悬浮窗权限才能显示控制球</string>
@@ -103,7 +100,7 @@
     <string name="settings_enable_photo_fake">启用拍照内容替换</string>
     <string name="settings_enable_photo_fake_desc">动态拦截单次拍照请求并注入视频帧（性能开销高）</string>
     <string name="settings_system_permission">系统权限设置</string>
-    <string name="settings_system_permission_desc">管理应用的存储和通知权限</string>
+    <string name="settings_system_permission_desc">管理应用的存储权限</string>
     <string name="settings_export_logs">输出运行日志</string>
     <string name="settings_export_logs_desc">需要root | 长按清空日志</string>
     <string name="settings_export_logs_success">日志已成功导出</string>
@@ -138,16 +135,9 @@
     <string name="replace_mode_image">图片模式</string>
     <string name="replace_mode_image_desc">使用静态图片替换相机预览和拍照</string>
 
-    <!-- Notification Service -->
-    <string name="notif_rotate_label">旋转:</string>
-    <string name="notif_rotate_offset">旋转偏移: </string>
-    <string name="notif_action_prev">上一条</string>
-    <string name="notif_action_next">下一条</string>
-    <string name="notif_action_exit">退出</string>
-    <string name="notif_channel_name">Virtual Face Camera 控制服务</string>
-    <string name="notif_channel_desc">显示 Virtual Face Camera 视频切换控制</string>
+    <!-- Overlay -->
     <string name="overlay_action_rotate">旋转</string>
-    <string name="overlay_action_close">关闭</string>
+    <string name="overlay_rotation_status">旋转：%d°</string>
 
     <!-- Home Screen - Version Card -->
     <string name="version_current">当前版本</string>

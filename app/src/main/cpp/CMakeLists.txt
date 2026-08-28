@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22.1)
-project("camswap-native-hook" LANGUAGES C CXX)
+project("virtual-face-camera-native" LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -15,24 +15,19 @@ else()
     message(FATAL_ERROR "Dobby not found at ${DOBBY_DIR}. Run: git submodule update --init --recursive")
 endif()
 
-add_library(camswap-native-hook SHARED
-    native_audio_hook.cpp
-    pcm_bridge.cpp
-    hook_aaudio.cpp
-    hook_opensles.cpp
+# CameraServer Java/JNI shared-memory bridge. This is intentionally separate
+# from the CameraServer injection library and contains no audio hooks.
+add_library(cs_bridge SHARED
+    camera_server_bridge_jni.cpp
 )
 
-target_include_directories(camswap-native-hook PRIVATE
+target_include_directories(cs_bridge PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${DOBBY_DIR}/include
 )
 
-target_link_libraries(camswap-native-hook
-    dobby
+target_link_libraries(cs_bridge
     log
-    dl
     android
-    OpenSLES
 )
 
 # CameraServer Native Hook Library (Scheme 2)

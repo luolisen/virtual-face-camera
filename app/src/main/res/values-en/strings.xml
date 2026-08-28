@@ -25,7 +25,6 @@
     <string name="status_paused">Paused</string>
     <string name="status_label_video">Source</string>
     <string name="status_label_play_mode">Mode</string>
-    <string name="status_label_notification">Notification</string>
     <string name="status_label_target_apps">Target Apps</string>
     <string name="status_value_on">On</string>
     <string name="status_value_off">Off</string>
@@ -44,8 +43,6 @@
     <!-- Settings Screen -->
     <string name="settings_category_mode">Mode Switch</string>
     <string name="settings_category_general">General Settings</string>
-    <string name="settings_notification_control">Enable Notification Control</string>
-    <string name="settings_notification_control_desc">Quick switch video in notification</string>
     <string name="settings_overlay_control">Enable Floating Overlay Control</string>
     <string name="settings_overlay_control_desc">Show a draggable bubble with five fixed video shortcuts</string>
     <string name="settings_overlay_permission_desc">Overlay permission is required to show the floating control bubble</string>
@@ -80,7 +77,7 @@
     <string name="settings_enable_photo_fake">Enable Photo Fake</string>
     <string name="settings_enable_photo_fake_desc">Dynamic interception to inject video frames to static photo requests (High performance cost)</string>
     <string name="settings_system_permission">System Permission Settings</string>
-    <string name="settings_system_permission_desc">Manage storage and notification permissions</string>
+    <string name="settings_system_permission_desc">Manage storage permission</string>
     <string name="settings_export_logs">Export Runtime Logs</string>
     <string name="settings_export_logs_desc">Requires root | Long press to clear logs</string>
     <string name="settings_export_logs_success">Logs exported successfully</string>
@@ -120,16 +117,9 @@
     <string name="replace_mode_image">Image Mode</string>
     <string name="replace_mode_image_desc">Use static image to replace camera preview and capture</string>
 
-    <!-- Notification Service -->
-    <string name="notif_rotate_label">Rotate:</string>
-    <string name="notif_rotate_offset">Rotation Offset: </string>
-    <string name="notif_action_prev">Previous</string>
-    <string name="notif_action_next">Next</string>
-    <string name="notif_action_exit">Exit</string>
-    <string name="notif_channel_name">Virtual Face Camera Control Service</string>
-    <string name="notif_channel_desc">Show Virtual Face Camera video control</string>
+    <!-- Overlay -->
     <string name="overlay_action_rotate">Rotate</string>
-    <string name="overlay_action_close">Close</string>
+    <string name="overlay_rotation_status">Rotation: %d°</string>
 
     <!-- Home Screen - Version Card -->
     <string name="version_current">Current Version</string>
