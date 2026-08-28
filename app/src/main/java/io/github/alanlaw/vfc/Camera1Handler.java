@@ -253,14 +253,18 @@ public class Camera1Handler implements ICameraHandler {
     }
 
     private void prepareHolderPreviewPlayer(int requestedWidth, int requestedHeight) {
-        if (HookMain.playerManager.mplayer1 == null) {
-            HookMain.playerManager.mplayer1 = new MediaPlayer();
-        } else {
-            HookMain.playerManager.mplayer1.release();
-            HookMain.playerManager.mplayer1 = null;
-            HookMain.playerManager.mplayer1 = new MediaPlayer();
+        HookMain.playerManager.invalidatePlayerSlot("c1_holder");
+        if (HookMain.playerManager.mplayer1 != null) {
+            try {
+                HookMain.playerManager.mplayer1.release();
+            } catch (Exception ignored) {
+            }
         }
+        MediaPlayer player = new MediaPlayer();
+        HookMain.playerManager.mplayer1 = player;
         if (HookMain.ori_holder == null || !HookMain.ori_holder.getSurface().isValid()) {
+            player.release();
+            HookMain.playerManager.mplayer1 = null;
             return;
         }
         GLVideoRenderer.releaseSafely(HookMain.playerManager.c1_renderer_holder);
@@ -272,38 +276,13 @@ public class Camera1Handler implements ICameraHandler {
             updateRendererProducerTransform(HookMain.mcamera1);
             Camera1SessionRegistry.setPreviewTarget(HookMain.mcamera1, HookMain.ori_holder.getSurface());
             Camera1SessionRegistry.applyCurrentPreviewTransform(HookMain.mcamera1);
-            HookMain.playerManager.mplayer1.setSurface(renderer.getInputSurface());
             HookMain.playerManager.configureRenderer(renderer, null);
-            HookMain.playerManager.mplayer1.setOnVideoSizeChangedListener(
-                    (mp, width, height) -> {
-                        renderer.setSourceSize(width, height);
-                        HookMain.processPendingViewportCommandIfReady();
-                    });
         } else {
-            HookMain.playerManager.mplayer1.setSurface(HookMain.ori_holder.getSurface());
+            player.setSurface(HookMain.ori_holder.getSurface());
         }
-        HookMain.playerManager.mplayer1.setVolume(0f, 0f);
         HookMain.is_someone_playing = false;
-        HookMain.playerManager.mplayer1.setLooping(true);
-        HookMain.playerManager.mplayer1.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
-            @Override
-            public void onPrepared(MediaPlayer mp) {
-                HookMain.playerManager.mplayer1.start();
-            }
-        });
-
-        try {
-            android.os.ParcelFileDescriptor pfd = HookMain.getVideoPFD();
-            if (pfd != null) {
-                HookMain.playerManager.mplayer1.setDataSource(pfd.getFileDescriptor());
-                pfd.close();
-            } else {
-                HookMain.playerManager.mplayer1.setDataSource(VideoManager.getCurrentVideoPath());
-            }
-            HookMain.playerManager.mplayer1.prepare();
-        } catch (Exception e) {
-            LogUtil.log("【CS】mplayer1 prepare 异常: " + e.toString());
-        }
+        HookMain.playerManager.prepareCamera1Player(player, renderer, "c1_holder",
+                HookMain.ori_holder.getSurface());
     }
 
     private void prepareTexturePreviewTarget(Camera camera, SurfaceTexture texture) {
@@ -329,12 +308,15 @@ public class Camera1Handler implements ICameraHandler {
         Camera1SessionRegistry.setPreviewTarget(HookMain.origin_preview_camera, HookMain.mSurface);
         Camera1SessionRegistry.applyCurrentPreviewTransform(HookMain.origin_preview_camera);
 
-        if (HookMain.playerManager.mMediaPlayer == null) {
-            HookMain.playerManager.mMediaPlayer = new MediaPlayer();
-        } else {
-            HookMain.playerManager.mMediaPlayer.release();
-            HookMain.playerManager.mMediaPlayer = new MediaPlayer();
+        HookMain.playerManager.invalidatePlayerSlot("c1_texture");
+        if (HookMain.playerManager.mMediaPlayer != null) {
+            try {
+                HookMain.playerManager.mMediaPlayer.release();
+            } catch (Exception ignored) {
+            }
         }
+        MediaPlayer player = new MediaPlayer();
+        HookMain.playerManager.mMediaPlayer = player;
 
         GLVideoRenderer.releaseSafely(HookMain.playerManager.c1_renderer_texture);
         GLVideoRenderer renderer = GLVideoRenderer.createSafely(HookMain.mSurface, "c1_texture",
@@ -343,39 +325,14 @@ public class Camera1Handler implements ICameraHandler {
         if (renderer != null && renderer.isInitialized()) {
             renderer.setRequestedFootprint(requestedWidth, requestedHeight);
             updateRendererProducerTransform(HookMain.origin_preview_camera);
-            HookMain.playerManager.mMediaPlayer.setSurface(renderer.getInputSurface());
             HookMain.playerManager.configureRenderer(renderer, null);
-            HookMain.playerManager.mMediaPlayer.setOnVideoSizeChangedListener(
-                    (mp, width, height) -> {
-                        renderer.setSourceSize(width, height);
-                        HookMain.processPendingViewportCommandIfReady();
-                    });
         } else {
-            HookMain.playerManager.mMediaPlayer.setSurface(HookMain.mSurface);
+            player.setSurface(HookMain.mSurface);
         }
 
-        HookMain.playerManager.mMediaPlayer.setVolume(0f, 0f);
         HookMain.is_someone_playing = false;
-        HookMain.playerManager.mMediaPlayer.setLooping(true);
-        HookMain.playerManager.mMediaPlayer.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
-            @Override
-            public void onPrepared(MediaPlayer mp) {
-                HookMain.playerManager.mMediaPlayer.start();
-            }
-        });
-
-        try {
-            android.os.ParcelFileDescriptor pfd = HookMain.getVideoPFD();
-            if (pfd != null) {
-                HookMain.playerManager.mMediaPlayer.setDataSource(pfd.getFileDescriptor());
-                pfd.close();
-            } else {
-                HookMain.playerManager.mMediaPlayer.setDataSource(VideoManager.getCurrentVideoPath());
-            }
-            HookMain.playerManager.mMediaPlayer.prepare();
-        } catch (Exception e) {
-            LogUtil.log("【CS】mMediaPlayer prepare 异常: " + e.toString());
-        }
+        HookMain.playerManager.prepareCamera1Player(player, renderer, "c1_texture",
+                HookMain.mSurface);
     }
 
     private void updateRendererProducerTransform(Camera camera) {

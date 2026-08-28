@@ -21,7 +21,7 @@ import java.nio.FloatBuffer;
 import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * A robust fallback for when targetSurface (usually SurfaceTexture-backed)
@@ -59,28 +59,28 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
     private final float[] mCropMatrix = new float[16];
     private final float[] mRotMatrix = new float[16];
 
-    // State
-    private volatile int mRotationDegrees = 0;
-    private volatile int mSourceWidth = 0;
-    private volatile int mSourceHeight = 0;
-    private volatile String mAspectMode = ConfigManager.ASPECT_MODE_DYNAMIC;
+    // State. One immutable snapshot is consumed per frame.
     private final RenderTargetRole mRenderTargetRole;
-    private volatile HostWindowGeometry.Snapshot mHostWindowGeometry = HostWindowGeometry.Snapshot.unavailable();
-    private volatile String mActivePresetId = "";
-    private volatile String mActiveShortcutKey = "";
-    private volatile float mSourceAnchorU = 0.5f;
-    private volatile float mSourceAnchorV = 0.5f;
-    private volatile float mZoom = ConfigManager.DEFAULT_VIEWPORT_ZOOM;
-    private volatile int mRequestedWidth;
-    private volatile int mRequestedHeight;
-    private volatile int mProducerTransformFlags;
-    private volatile int mViewportMoveStepPercent = ConfigManager.DEFAULT_VIEWPORT_MOVE_STEP_PERCENT;
-    private volatile boolean mDynamicGeometryDirty = true;
-    private volatile boolean mDiagnosticDirty = true;
+    private final AtomicReference<RendererState> mState;
+    private final Object mStateLock = new Object();
     private VirtualSensorGeometry.Calculation mDynamicGeometry;
+    private RenderTargetGeometry.Calculation mTargetGeometry;
     private volatile boolean mReleased = false;
+    private volatile boolean mReleaseRequested = false;
     private boolean mInitialized = false;
     private String mLastAspectDiagnostic;
+    private long mCachedGeometryGeneration = -1L;
+    private long mCachedTargetGeometryGeneration = -1L;
+    private long mCachedAspectLayoutGeneration = -1L;
+    private int mCachedRawTargetWidth = -1;
+    private int mCachedRawTargetHeight = -1;
+    private int mCachedAspectTargetWidth = -1;
+    private int mCachedAspectTargetHeight = -1;
+    private VideoAspectLayout.Layout mAspectLayout;
+    private RenderTargetRole mCachedTargetRole;
+    private int mFramesSinceSurfaceSizeCheck;
+    private int mConsecutiveSwapFailures;
+    private static final int SURFACE_SIZE_RECHECK_INTERVAL = 30;
 
     // Thread
     private HandlerThread mGLThread;
@@ -94,9 +94,12 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
     private FloatBuffer mTexCoordBuffer;
     private final int[] mSurfaceWidth = new int[1];
     private final int[] mSurfaceHeight = new int[1];
-    private final AtomicBoolean mRenderTaskScheduled = new AtomicBoolean();
-    private final AtomicBoolean mFramePending = new AtomicBoolean();
-    private final Object mRenderScheduleLock = new Object();
+    private long mLastAspectStateGeneration = -1L;
+    private int mLastAspectRawTargetWidth = -1;
+    private int mLastAspectRawTargetHeight = -1;
+    private RenderTargetRole mLastAspectRole;
+    private long mLastRenderStateDiagnosticGeneration = -1L;
+    private final FrameTaskCoalescer mFrameCoalescer = new FrameTaskCoalescer();
     private final Runnable mRenderRunnable = this::runCoalescedFrame;
 
     // Shader sources, vertices, and tex coords shared via GLHelper
@@ -108,6 +111,7 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
     public SurfaceRelay(Surface targetSurface, String tag, RenderTargetRole role) {
         mTag = tag;
         mRenderTargetRole = role == null ? RenderTargetRole.PREVIEW : role;
+        mState = new AtomicReference<>(RendererState.initial(mRenderTargetRole));
         mTargetSurface = targetSurface;
         Matrix.setIdentityM(mRotMatrix, 0);
         Matrix.setIdentityM(mSTMatrix, 0);
@@ -142,7 +146,7 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
     }
 
     public boolean isInitialized() {
-        return mInitialized && !mReleased;
+        return mInitialized && !mReleased && !mReleaseRequested;
     }
 
     public Surface getInputSurface() {
@@ -151,130 +155,107 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
 
     public void setRotation(int degrees) {
         int normalized = ((degrees % 360) + 360) % 360;
-        if (mRotationDegrees != normalized) {
-            mRotationDegrees = normalized;
-            mDynamicGeometryDirty = true;
-            mDiagnosticDirty = true;
+        synchronized (mStateLock) {
+            mState.set(mState.get().withRotation(normalized));
         }
     }
 
     public void setSourceSize(int width, int height) {
         if (width > 0 && height > 0) {
-            if (mSourceWidth != width || mSourceHeight != height) {
-                mSourceWidth = width;
-                mSourceHeight = height;
-                mDynamicGeometryDirty = true;
-                mDiagnosticDirty = true;
+            synchronized (mStateLock) {
+                mState.set(mState.get().withSourceSize(width, height));
             }
         }
     }
 
     public void setAspectMode(String aspectMode) {
-        String nextMode;
-        if (ConfigManager.ASPECT_MODE_FIT.equals(aspectMode)) {
-            nextMode = ConfigManager.ASPECT_MODE_FIT;
-        } else if (ConfigManager.ASPECT_MODE_CROP.equals(aspectMode)) {
-            nextMode = ConfigManager.ASPECT_MODE_CROP;
-        } else {
-            nextMode = ConfigManager.ASPECT_MODE_DYNAMIC;
-        }
-        if (!nextMode.equals(mAspectMode)) {
-            mAspectMode = nextMode;
-            mDynamicGeometryDirty = true;
-            mDiagnosticDirty = true;
+        synchronized (mStateLock) {
+            mState.set(mState.get().withAspectMode(aspectMode));
         }
     }
 
     public void setHostWindowGeometry(HostWindowGeometry.Snapshot geometry) {
-        HostWindowGeometry.Snapshot next = geometry == null
-                ? HostWindowGeometry.Snapshot.unavailable()
-                : geometry;
-        if (!next.equals(mHostWindowGeometry)) {
-            mHostWindowGeometry = next;
-            mDiagnosticDirty = true;
+        synchronized (mStateLock) {
+            mState.set(mState.get().withHostWindowGeometry(geometry));
         }
     }
 
     /** Set the requested camera footprint; zero means use the raw target. */
     public void setRequestedFootprint(int width, int height) {
-        int nextWidth = width > 0 && height > 0 ? width : 0;
-        int nextHeight = width > 0 && height > 0 ? height : 0;
-        if (mRequestedWidth != nextWidth || mRequestedHeight != nextHeight) {
-            mRequestedWidth = nextWidth;
-            mRequestedHeight = nextHeight;
-            mDynamicGeometryDirty = true;
-            mDiagnosticDirty = true;
+        synchronized (mStateLock) {
+            mState.set(mState.get().withRequestedFootprint(width, height));
         }
     }
 
     /** Record the Camera1 producer transform for low-noise diagnostics. */
     public void setProducerTransformFlags(int transformFlags) {
-        if (mProducerTransformFlags != transformFlags) {
-            mProducerTransformFlags = transformFlags;
-            mDiagnosticDirty = true;
+        synchronized (mStateLock) {
+            mState.set(mState.get().withProducerTransformFlags(transformFlags));
         }
     }
 
     /** Apply the active preset shortcut's decoded-source viewport anchor. */
     public void setViewportState(ConfigManager.ActiveBinding activeBinding, int stepPercent) {
-        mViewportMoveStepPercent = Math.max(ConfigManager.MIN_VIEWPORT_MOVE_STEP_PERCENT,
-                Math.min(ConfigManager.MAX_VIEWPORT_MOVE_STEP_PERCENT, stepPercent));
-        if (activeBinding == null || activeBinding.getViewport() == null) {
-            mActivePresetId = "";
-            mActiveShortcutKey = "";
-            mSourceAnchorU = 0.5f;
-            mSourceAnchorV = 0.5f;
-            mZoom = ConfigManager.DEFAULT_VIEWPORT_ZOOM;
-            mDynamicGeometryDirty = true;
-            mDiagnosticDirty = true;
+        synchronized (mStateLock) {
+            mState.set(mState.get().withViewportState(activeBinding, stepPercent));
+        }
+    }
+
+    public RendererState getState() {
+        return mState.get();
+    }
+
+    /** Atomically publish all renderer inputs for the next frame. */
+    public void applyState(RendererState state) {
+        if (state == null || state.role != mRenderTargetRole) {
             return;
         }
-        mActivePresetId = activeBinding.getPresetId();
-        mActiveShortcutKey = activeBinding.getShortcutKey();
-        mSourceAnchorU = activeBinding.getViewport().getAnchorU();
-        mSourceAnchorV = activeBinding.getViewport().getAnchorV();
-        mZoom = activeBinding.getViewport().getZoom();
-        mDynamicGeometryDirty = true;
-        mDiagnosticDirty = true;
+        synchronized (mStateLock) {
+            RendererState current = mState.get();
+            // A candidate is derived from a snapshot read outside this lock.
+            // Strict monotonicity prevents a stale config candidate with the
+            // same generation from overwriting a concurrent source-size update.
+            if (state.generation > current.generation) {
+                mState.set(state);
+            }
+        }
     }
 
     @Override
     public void onFrameAvailable(SurfaceTexture surfaceTexture) {
-        if (mReleased || !mInitialized || mGLHandler == null)
+        Handler handler = mGLHandler;
+        if (mReleased || mReleaseRequested || !mInitialized || handler == null)
             return;
-        mFramePending.set(true);
-        synchronized (mRenderScheduleLock) {
-            if (!mRenderTaskScheduled.get()) {
-                mRenderTaskScheduled.set(true);
-                mGLHandler.post(mRenderRunnable);
-            }
+        if (mFrameCoalescer.onFrameAvailable() && !handler.post(mRenderRunnable)) {
+            mFrameCoalescer.cancel();
         }
     }
 
     private void runCoalescedFrame() {
-        while (!mReleased && mInitialized) {
-            mFramePending.set(false);
+        mFrameCoalescer.beginTask();
+        if (!mReleased && !mReleaseRequested && mInitialized) {
             drawFrame();
-            synchronized (mRenderScheduleLock) {
-                if (mFramePending.get()) {
-                    continue;
-                }
-                mRenderTaskScheduled.set(false);
-                return;
-            }
         }
-        synchronized (mRenderScheduleLock) {
-            mRenderTaskScheduled.set(false);
-            if (mFramePending.get() && !mReleased && mGLHandler != null) {
-                mRenderTaskScheduled.set(true);
-                mGLHandler.post(mRenderRunnable);
+        boolean followUp = mFrameCoalescer.finishTask();
+        if (followUp && !mReleased && !mReleaseRequested && mInitialized) {
+            Handler handler = mGLHandler;
+            if (handler == null || !handler.post(mRenderRunnable)) {
+                mFrameCoalescer.cancel();
             }
+        } else if (mReleased || mReleaseRequested || !mInitialized) {
+            mFrameCoalescer.cancel();
         }
     }
 
     private void drawFrame() {
-        if (mReleased || !mInitialized)
+        if (mReleased || mReleaseRequested || !mInitialized)
             return;
+        if (mTargetSurface != null && !mTargetSurface.isValid()) {
+            LogUtil.log("【CS】【Relay】" + mTag + " target surface 已失效，停止渲染");
+            mReleaseRequested = true;
+            return;
+        }
+        long startNanos = System.nanoTime();
         try {
             if (!EGL14.eglMakeCurrent(mEGLDisplay,
                     mEGLWindowSurface != EGL14.EGL_NO_SURFACE ? mEGLWindowSurface : mEGLPbufferSurface,
@@ -293,6 +274,7 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
                     mEGLWindowSurface = EGL14.eglCreateWindowSurface(mEGLDisplay, configs[0], mTargetSurface,
                             surfaceAttribs, 0);
                     if (mEGLWindowSurface != EGL14.EGL_NO_SURFACE) {
+                        mFramesSinceSurfaceSizeCheck = SURFACE_SIZE_RECHECK_INTERVAL;
                         EGL14.eglMakeCurrent(mEGLDisplay, mEGLWindowSurface, mEGLWindowSurface, mEGLContext);
                         LogUtil.log("【CS】【Relay】" + mTag + " late eglCreateWindowSurface 成功！");
                     } else {
@@ -306,46 +288,41 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
 
             EGLSurface activeSurface = mEGLWindowSurface != EGL14.EGL_NO_SURFACE
                     ? mEGLWindowSurface : mEGLPbufferSurface;
-            int previousWidth = mSurfaceWidth[0];
-            int previousHeight = mSurfaceHeight[0];
-            EGL14.eglQuerySurface(mEGLDisplay, activeSurface, EGL14.EGL_WIDTH, mSurfaceWidth, 0);
-            EGL14.eglQuerySurface(mEGLDisplay, activeSurface, EGL14.EGL_HEIGHT, mSurfaceHeight, 0);
+            refreshSurfaceSizeIfNeeded(activeSurface);
             int rawTargetWidth = mSurfaceWidth[0];
             int rawTargetHeight = mSurfaceHeight[0];
-            if (previousWidth != rawTargetWidth || previousHeight != rawTargetHeight) {
-                mDynamicGeometryDirty = true;
-                mDiagnosticDirty = true;
-            }
             if (rawTargetWidth > 0 && rawTargetHeight > 0) {
                 GLES20.glViewport(0, 0, rawTargetWidth, rawTargetHeight);
             }
 
+            RendererState state = mState.get();
+            logRenderStateIfChanged(state);
+            RenderTargetGeometry.Calculation targetGeometry = ensureTargetGeometry(
+                    rawTargetWidth, rawTargetHeight, mRenderTargetRole, state);
             Matrix.setIdentityM(mRotMatrix, 0);
             Matrix.setIdentityM(mCropMatrix, 0);
-            if (!ConfigManager.ASPECT_MODE_DYNAMIC.equals(mAspectMode)) {
+            if (!ConfigManager.ASPECT_MODE_DYNAMIC.equals(state.aspectMode)) {
                 Matrix.setIdentityM(mDynamicTextureMatrix, 0);
             }
-            if (ConfigManager.ASPECT_MODE_DYNAMIC.equals(mAspectMode)) {
-                ensureDynamicGeometry(rawTargetWidth, rawTargetHeight, mRenderTargetRole);
+            if (ConfigManager.ASPECT_MODE_DYNAMIC.equals(state.aspectMode)) {
+                ensureDynamicGeometry(rawTargetWidth, rawTargetHeight, targetGeometry,
+                        mRenderTargetRole, state);
             } else if (rawTargetWidth > 0 && rawTargetHeight > 0
-                    && mSourceWidth > 0 && mSourceHeight > 0) {
+                    && state.sourceWidth > 0 && state.sourceHeight > 0) {
                 Matrix.setIdentityM(mDynamicTextureMatrix, 0);
-                VideoAspectLayout.Layout layout = VideoAspectLayout.calculate(
-                        mSourceWidth, mSourceHeight,
-                        rawTargetWidth, rawTargetHeight,
-                        mRotationDegrees, mAspectMode);
+                int logicalTargetWidth = targetGeometry == null
+                        ? rawTargetWidth : targetGeometry.logicalTargetWidth;
+                int logicalTargetHeight = targetGeometry == null
+                        ? rawTargetHeight : targetGeometry.logicalTargetHeight;
+                VideoAspectLayout.Layout layout = ensureAspectLayout(
+                        state, logicalTargetWidth, logicalTargetHeight);
                 Matrix.scaleM(mRotMatrix, 0, layout.scaleX, layout.scaleY, 1.0f);
-                if (mRotationDegrees != 0) {
-                    Matrix.rotateM(mRotMatrix, 0, -mRotationDegrees, 0, 0, 1.0f);
+                if (state.rotationDegrees != 0) {
+                    Matrix.rotateM(mRotMatrix, 0, -state.rotationDegrees, 0, 0, 1.0f);
                 }
-                if (mDiagnosticDirty) {
-                    RenderTargetGeometry.Calculation geometry = RenderTargetGeometry.calculate(
-                            rawTargetWidth, rawTargetHeight, mHostWindowGeometry, mRenderTargetRole);
-                    logAspectIfChanged(geometry, layout, null, null);
-                    mDiagnosticDirty = false;
-                }
-            } else if (mRotationDegrees != 0) {
-                Matrix.rotateM(mRotMatrix, 0, -mRotationDegrees, 0, 0, 1.0f);
+                logAspectIfChanged(targetGeometry, layout, null, null, state);
+            } else if (state.rotationDegrees != 0) {
+                Matrix.rotateM(mRotMatrix, 0, -state.rotationDegrees, 0, 0, 1.0f);
             }
 
             GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -374,75 +351,167 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
 
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
 
-        if (mEGLWindowSurface != EGL14.EGL_NO_SURFACE) {
-                EGL14.eglSwapBuffers(mEGLDisplay, mEGLWindowSurface);
+            if (mEGLWindowSurface != EGL14.EGL_NO_SURFACE) {
+                if (!EGL14.eglSwapBuffers(mEGLDisplay, mEGLWindowSurface)) {
+                    int err = EGL14.eglGetError();
+                    mConsecutiveSwapFailures++;
+                    LogUtil.log("【CS】【Relay】" + mTag
+                            + " eglSwapBuffers 失败, err=" + err);
+                    if (err == EGL14.EGL_BAD_SURFACE
+                            || err == EGL14.EGL_BAD_NATIVE_WINDOW
+                            || mConsecutiveSwapFailures >= 3) {
+                        mReleaseRequested = true;
+                    }
+                } else {
+                    mConsecutiveSwapFailures = 0;
+                }
             }
         } catch (Exception e) {
             LogUtil.log("【CS】【Relay】" + mTag + " drawFrame 异常: " + e);
+        } finally {
+            long durationMs = (System.nanoTime() - startNanos) / 1_000_000L;
+            if (durationMs > 50L) {
+                LogUtil.log("[VFC][GLSlowFrame] renderer=" + mTag
+                        + " durationMs=" + durationMs
+                        + " surface=" + mSurfaceWidth[0] + "x" + mSurfaceHeight[0]
+                        + " stateGeneration=" + mState.get().generation
+                        + " severe=" + (durationMs > 200L));
+            }
         }
+    }
+
+    private void refreshSurfaceSizeIfNeeded(EGLSurface activeSurface) {
+        if (mSurfaceWidth[0] > 0 && mSurfaceHeight[0] > 0
+                && ++mFramesSinceSurfaceSizeCheck < SURFACE_SIZE_RECHECK_INTERVAL) {
+            return;
+        }
+        mFramesSinceSurfaceSizeCheck = 0;
+        EGL14.eglQuerySurface(mEGLDisplay, activeSurface, EGL14.EGL_WIDTH, mSurfaceWidth, 0);
+        EGL14.eglQuerySurface(mEGLDisplay, activeSurface, EGL14.EGL_HEIGHT, mSurfaceHeight, 0);
+        if (mSurfaceWidth[0] != mCachedRawTargetWidth
+                || mSurfaceHeight[0] != mCachedRawTargetHeight) {
+            mCachedRawTargetWidth = mSurfaceWidth[0];
+            mCachedRawTargetHeight = mSurfaceHeight[0];
+            mCachedGeometryGeneration = -1L;
+            mCachedTargetGeometryGeneration = -1L;
+            mCachedAspectLayoutGeneration = -1L;
+            mDynamicGeometry = null;
+            mTargetGeometry = null;
+            mAspectLayout = null;
+        }
+    }
+
+    private VideoAspectLayout.Layout ensureAspectLayout(RendererState state,
+            int logicalTargetWidth, int logicalTargetHeight) {
+        if (mAspectLayout == null
+                || mCachedAspectLayoutGeneration != state.generation
+                || mCachedAspectTargetWidth != logicalTargetWidth
+                || mCachedAspectTargetHeight != logicalTargetHeight) {
+            mAspectLayout = VideoAspectLayout.calculate(
+                    state.sourceWidth, state.sourceHeight,
+                    logicalTargetWidth, logicalTargetHeight,
+                    state.rotationDegrees, state.aspectMode);
+            mCachedAspectLayoutGeneration = state.generation;
+            mCachedAspectTargetWidth = logicalTargetWidth;
+            mCachedAspectTargetHeight = logicalTargetHeight;
+        }
+        return mAspectLayout;
+    }
+
+    private RenderTargetGeometry.Calculation ensureTargetGeometry(int rawTargetWidth,
+            int rawTargetHeight, RenderTargetRole role, RendererState state) {
+        if (mTargetGeometry == null
+                || mCachedTargetGeometryGeneration != state.generation
+                || mCachedTargetRole != role) {
+            mTargetGeometry = RenderTargetGeometry.calculate(rawTargetWidth, rawTargetHeight,
+                    state.hostWindowGeometry, role);
+            mCachedTargetGeometryGeneration = state.generation;
+            mCachedTargetRole = role;
+        }
+        return mTargetGeometry;
     }
 
     private void ensureDynamicGeometry(int rawTargetWidth, int rawTargetHeight,
-            RenderTargetRole role) {
-        if (!mDynamicGeometryDirty && mDynamicGeometry != null
+            RenderTargetGeometry.Calculation targetGeometry, RenderTargetRole role,
+            RendererState state) {
+        if (mDynamicGeometry != null
+                && mCachedGeometryGeneration == state.generation
                 && mDynamicGeometry.role == role) {
-            if (mDiagnosticDirty) {
-                logDynamicAspectIfChanged(rawTargetWidth, rawTargetHeight, role);
-                mDiagnosticDirty = false;
-            }
             return;
         }
 
-        int requestedWidth = role == RenderTargetRole.PREVIEW && mRequestedWidth > 0
-                ? mRequestedWidth : rawTargetWidth;
-        int requestedHeight = role == RenderTargetRole.PREVIEW && mRequestedHeight > 0
-                ? mRequestedHeight : rawTargetHeight;
+        // Dynamic v3 uses the actual requested output aspect. Host-window
+        // compensation is deliberately kept in VideoAspectLayout's FIT/CROP
+        // target calculation; it must not swap the producer's requested
+        // Camera buffer dimensions for Dynamic sampling.
+        int requestedWidth = role == RenderTargetRole.PREVIEW
+                && state.requestedWidth > 0 ? state.requestedWidth : rawTargetWidth;
+        int requestedHeight = role == RenderTargetRole.PREVIEW
+                && state.requestedHeight > 0 ? state.requestedHeight : rawTargetHeight;
         mDynamicGeometry = VirtualSensorGeometry.calculate(
-                mSourceWidth, mSourceHeight,
-                requestedWidth, requestedHeight, mRotationDegrees,
-                mSourceAnchorU, mSourceAnchorV, mZoom, role);
-        float[] dynamicMatrix = VirtualSensorGeometry.buildDynamicTextureMatrix(mDynamicGeometry);
-        System.arraycopy(dynamicMatrix, 0, mDynamicTextureMatrix, 0,
-                mDynamicTextureMatrix.length);
+                state.sourceWidth, state.sourceHeight,
+                requestedWidth, requestedHeight, state.rotationDegrees,
+                state.anchorU, state.anchorV, state.zoom, role);
+        VirtualSensorGeometry.buildDynamicTextureMatrix(mDynamicGeometry,
+                mDynamicTextureMatrix);
         Matrix.setIdentityM(mCropMatrix, 0);
         Matrix.setIdentityM(mRotMatrix, 0);
-        mDynamicGeometryDirty = false;
-        logDynamicAspectIfChanged(rawTargetWidth, rawTargetHeight, role);
-        mDiagnosticDirty = false;
+        mCachedGeometryGeneration = state.generation;
+        logDynamicAspectIfChanged(rawTargetWidth, rawTargetHeight, targetGeometry, role, state);
     }
 
     private void logDynamicAspectIfChanged(int rawTargetWidth, int rawTargetHeight,
-            RenderTargetRole role) {
+            RenderTargetGeometry.Calculation targetGeometry, RenderTargetRole role,
+            RendererState state) {
         VirtualSensorGeometry.Calculation geometry = mDynamicGeometry;
         if (geometry == null) {
             return;
         }
-        HostWindowGeometry.Snapshot host = mHostWindowGeometry;
+        HostWindowGeometry.Snapshot host = state.hostWindowGeometry;
         int hostWidth = host == null ? 0 : host.getWidth();
         int hostHeight = host == null ? 0 : host.getHeight();
         int displayRotation = host == null
                 ? HostWindowGeometry.UNKNOWN_ROTATION : host.getDisplayRotation();
+        int logicalTargetWidth = targetGeometry == null
+                ? rawTargetWidth : targetGeometry.logicalTargetWidth;
+        int logicalTargetHeight = targetGeometry == null
+                ? rawTargetHeight : targetGeometry.logicalTargetHeight;
+        boolean compensated = targetGeometry != null && targetGeometry.orientationCompensated;
         String diagnostic = String.format(Locale.US,
                 "role=%s|renderer=%s|source=%dx%d|rawTarget=%dx%d|host=%dx%d"
                         + "|logicalTarget=%dx%d|displayRotation=%d|videoRotation=%d|mode=%s"
-                        + "|sourceAspect=%.5f|targetAspect=%.5f|fitScale=%.5f"
+                        + "|sourceAspect=%.5f|targetAspect=%.5f|scaleX=1.00000|scaleY=1.00000"
                         + "|baseViewport=%.2fx%.2f|effectiveViewport=%.2fx%.2f"
                         + "|zoom=%.4f|sourceAnchor=%.5f,%.5f|effectiveAnchor=%.5f,%.5f"
-                        + "|transformFlags=0x%02x"
-                        + "|orientationCompensated=false|hostGeometryAffectsRendering=false",
-                role, mTag, mSourceWidth, mSourceHeight,
+                        + "|transformFlags=0x%02x|orientationCompensated=%s",
+                role, mTag, state.sourceWidth, state.sourceHeight,
                 rawTargetWidth, rawTargetHeight, hostWidth, hostHeight,
-                rawTargetWidth, rawTargetHeight, displayRotation, mRotationDegrees,
-                mAspectMode, geometry.sourceAspect, geometry.targetAspect,
-                geometry.fitScale, geometry.baseViewportWidth, geometry.baseViewportHeight,
+                logicalTargetWidth, logicalTargetHeight, displayRotation, state.rotationDegrees,
+                state.aspectMode, geometry.sourceAspect, geometry.targetAspect,
+                geometry.baseViewportWidth, geometry.baseViewportHeight,
                 geometry.viewportWidth, geometry.viewportHeight, geometry.zoom,
                 geometry.sourceAnchorU, geometry.sourceAnchorV,
                 geometry.logicalAnchorU, geometry.logicalAnchorV,
-                mProducerTransformFlags);
+                state.producerTransformFlags, compensated);
         if (!diagnostic.equals(mLastAspectDiagnostic)) {
             mLastAspectDiagnostic = diagnostic;
-            LogUtil.log("[VFC][DynamicV2] " + diagnostic);
+            LogUtil.log("[VFC][Aspect] " + diagnostic);
         }
+    }
+
+    private void logRenderStateIfChanged(RendererState state) {
+        if (state == null || state.generation == mLastRenderStateDiagnosticGeneration) {
+            return;
+        }
+        mLastRenderStateDiagnosticGeneration = state.generation;
+        LogUtil.log("[VFC][RenderState] renderer=" + mTag
+                + " generation=" + state.generation
+                + " source=" + state.sourceWidth + "x" + state.sourceHeight
+                + " rotation=" + state.rotationDegrees
+                + " aspect=" + state.aspectMode
+                + " anchor=" + state.anchorU + "," + state.anchorV
+                + " zoom=" + state.zoom
+                + " requestedOutput=" + state.requestedWidth + "x" + state.requestedHeight);
     }
 
     private EGLConfig[] getEglConfigs() {
@@ -552,7 +621,8 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
     public void release() {
         if (mReleased)
             return;
-        mReleased = true;
+        mReleaseRequested = true;
+        mFrameCoalescer.cancel();
         if (mGLHandler != null)
             mGLHandler.post(this::releaseInternal);
         if (mGLThread != null) {
@@ -565,6 +635,12 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
     }
 
     private void releaseInternal() {
+        if (mReleased) {
+            return;
+        }
+        mReleased = true;
+        mInitialized = false;
+        mFrameCoalescer.cancel();
         if (mInputSurface != null) {
             mInputSurface.release();
             mInputSurface = null;
@@ -603,7 +679,17 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
     private void logAspectIfChanged(RenderTargetGeometry.Calculation geometry,
             VideoAspectLayout.Layout layout,
             VirtualSensorGeometry.Calculation dynamicGeometry,
-            VirtualSensorGeometry.NormalizedRect dynamicCrop) {
+            VirtualSensorGeometry.NormalizedRect dynamicCrop,
+            RendererState state) {
+        if (geometry == null || layout == null || state == null) {
+            return;
+        }
+        if (mLastAspectStateGeneration == state.generation
+                && mLastAspectRawTargetWidth == geometry.rawTargetWidth
+                && mLastAspectRawTargetHeight == geometry.rawTargetHeight
+                && mLastAspectRole == geometry.role) {
+            return;
+        }
         float sourceAspect = dynamicGeometry == null
                 ? layout.sourceAspect : dynamicGeometry.sourceAspect;
         float targetAspect = dynamicGeometry == null
@@ -615,30 +701,34 @@ public class SurfaceRelay implements SurfaceTexture.OnFrameAvailableListener {
                 : String.format(Locale.US, "%.5f,%.5f",
                         dynamicGeometry.logicalAnchorU, dynamicGeometry.logicalAnchorV);
         String sourceAnchor = String.format(Locale.US, "%.5f,%.5f",
-                mSourceAnchorU, mSourceAnchorV);
+                state.anchorU, state.anchorV);
         String crop = dynamicCrop == null ? "-" : dynamicCrop.toString();
         String diagnostic = String.format(Locale.US,
                 "role=%s|renderer=%s|source=%dx%d|rawTarget=%dx%d|host=%dx%d|logicalTarget=%dx%d"
                         + "|displayRotation=%d|videoRotation=%d|mode=%s|sourceAspect=%.5f"
                         + "|targetAspect=%.5f|scaleX=%.5f|scaleY=%.5f|orientationCompensated=%s"
-                        + "|hostGeometryAffectsRendering=false|activePreset=%s|activeShortcut=%s"
+                        + "|activePreset=%s|activeShortcut=%s"
                         + "|sourceAnchor=%s|logicalAnchor=%s|crop=%s|step=%d",
                 geometry.role,
                 mTag,
-                mSourceWidth, mSourceHeight,
+                state.sourceWidth, state.sourceHeight,
                 geometry.rawTargetWidth, geometry.rawTargetHeight,
                 geometry.hostWidth, geometry.hostHeight,
                 geometry.logicalTargetWidth, geometry.logicalTargetHeight,
-                geometry.displayRotation, mRotationDegrees, mAspectMode,
+                geometry.displayRotation, state.rotationDegrees, state.aspectMode,
                 sourceAspect, targetAspect,
                 scaleX, scaleY,
                 geometry.orientationCompensated,
-                mActivePresetId, mActiveShortcutKey,
-                sourceAnchor, logicalAnchor, crop, mViewportMoveStepPercent);
+                state.activePresetId, state.activeShortcutKey,
+                sourceAnchor, logicalAnchor, crop, state.viewportMoveStepPercent);
         if (!diagnostic.equals(mLastAspectDiagnostic)) {
             mLastAspectDiagnostic = diagnostic;
             LogUtil.log("[VFC][Aspect] " + diagnostic);
         }
+        mLastAspectStateGeneration = state.generation;
+        mLastAspectRawTargetWidth = geometry.rawTargetWidth;
+        mLastAspectRawTargetHeight = geometry.rawTargetHeight;
+        mLastAspectRole = geometry.role;
     }
 
     public static SurfaceRelay createSafely(Surface targetSurface, String tag) {

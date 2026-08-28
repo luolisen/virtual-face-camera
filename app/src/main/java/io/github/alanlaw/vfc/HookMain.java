@@ -149,10 +149,8 @@ public class HookMain {
                         playerManager.releaseAllRenderers();
                         return;
                     }
-                    playerManager.updateRotation(degrees);
-                    playerManager.updateAspectMode(aspectMode);
+                    playerManager.updateRenderingConfig(degrees, aspectMode);
                     camera2Hook.applyYuvPreviewRenderingConfig();
-                    camera2Hook.restartYuvDecoderForSourceChange();
                 }
 
                 @Override

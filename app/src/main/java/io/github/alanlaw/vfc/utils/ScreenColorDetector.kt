@@ -66,6 +66,14 @@ object ScreenColorDetector {
      */
     fun getAmbientColor(): FloatArray = floatArrayOf(currentRed, currentGreen, currentBlue)
 
+    // Primitive accessors keep the renderer's steady-state frame path
+    // allocation-free. The array API above remains for non-render callers.
+    fun getAmbientRed(): Float = currentRed
+
+    fun getAmbientGreen(): Float = currentGreen
+
+    fun getAmbientBlue(): Float = currentBlue
+
     /**
      * 获取当前环境光注入强度
      */

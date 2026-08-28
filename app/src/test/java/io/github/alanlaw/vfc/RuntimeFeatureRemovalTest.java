@@ -72,7 +72,7 @@ public class RuntimeFeatureRemovalTest {
     }
 
     @Test
-    public void dynamicV2KeepsCameraRolesAndRawViewportContract() throws IOException {
+    public void dynamicV3KeepsCameraRolesAndRawViewportContract() throws IOException {
         String renderer = readProjectFile(
                 "app/src/main/java/io/github/alanlaw/vfc/GLVideoRenderer.java");
         String relay = readProjectFile(
@@ -81,11 +81,20 @@ public class RuntimeFeatureRemovalTest {
                 "app/src/main/java/io/github/alanlaw/vfc/GLHelper.java");
         String camera1 = readProjectFile(
                 "app/src/main/java/io/github/alanlaw/vfc/Camera1Handler.java");
+        String manager = readProjectFile(
+                "app/src/main/java/io/github/alanlaw/vfc/MediaPlayerManager.java");
         String cmake = readProjectFile("app/src/main/cpp/CMakeLists.txt");
 
         assertTrue(renderer.contains("ensureDynamicGeometry"));
         assertTrue(renderer.contains("GLES20.glViewport(0, 0, rawTargetWidth, rawTargetHeight)"));
         assertTrue(renderer.contains("RenderTargetRole.CAPTURE"));
+        assertTrue(renderer.contains("refreshSurfaceSizeIfNeeded"));
+        assertFalse(frameBody(renderer).contains("eglQuerySurface"));
+        assertFalse(frameBody(relay).contains("eglQuerySurface"));
+        assertFalse(frameTaskBody(renderer).contains("while"));
+        assertFalse(frameTaskBody(relay).contains("while"));
+        assertTrue(manager.contains("prepareAsync()"));
+        assertTrue(camera1.contains("prepareCamera1Player"));
         assertTrue(relay.contains("ensureDynamicGeometry"));
         assertTrue(shader.contains("uSTMatrix * uDynamicTextureMatrix * uCropMatrix"));
         assertTrue(camera1.contains("Camera1SessionRegistry.registerOpened"));
@@ -94,6 +103,37 @@ public class RuntimeFeatureRemovalTest {
         assertTrue(cmake.contains("cs_camserver"));
         assertTrue(cmake.contains("cs_injector"));
         assertTrue(cmake.contains("cs_daemon"));
+    }
+
+    @Test
+    public void renderConfigDoesNotRestartYuvDecoder() throws IOException {
+        String hookMain = readProjectFile(
+                "app/src/main/java/io/github/alanlaw/vfc/HookMain.java");
+        int configCallback = hookMain.indexOf("public void onRenderingConfigChanged");
+        int viewportCallback = hookMain.indexOf("public void onViewportChanged", configCallback);
+        assertTrue(configCallback >= 0);
+        assertTrue(viewportCallback > configCallback);
+        String body = hookMain.substring(configCallback, viewportCallback);
+        assertFalse(body.contains("restartYuvDecoderForSourceChange"));
+    }
+
+    private static String frameTaskBody(String source) {
+        int start = source.indexOf("private void runCoalescedFrame");
+        int end = source.indexOf("private void drawFrame", start);
+        assertTrue(start >= 0);
+        assertTrue(end > start);
+        return source.substring(start, end);
+    }
+
+    private static String frameBody(String source) {
+        int start = source.indexOf("private void drawFrame");
+        int end = source.indexOf("private void renderToBackBuffer", start);
+        if (end < 0) {
+            end = source.indexOf("private void refreshSurfaceSizeIfNeeded", start);
+        }
+        assertTrue(start >= 0);
+        assertTrue(end > start);
+        return source.substring(start, end);
     }
 
     private static String readProjectFile(String relativePath) throws IOException {

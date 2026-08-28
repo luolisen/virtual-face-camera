@@ -16,7 +16,6 @@ public class VirtualSensorGeometryTest {
                 RenderTargetRole.PREVIEW);
 
         assertTrue(result.valid);
-        assertEquals(0.675f, result.fitScale, EPSILON);
         assertEquals(1080.0f, result.baseViewportWidth, EPSILON);
         assertEquals(491.4f, result.baseViewportHeight, EPSILON);
         assertEquals(1.0f, result.logicalCropRect.width(), EPSILON);
@@ -26,17 +25,31 @@ public class VirtualSensorGeometryTest {
     }
 
     @Test
-    public void requestedFootprintDoesNotBecomeMaximumAspectCrop() {
+    public void requestedPixelsOnlyChooseOutputAspect() {
         VirtualSensorGeometry.Calculation result = VirtualSensorGeometry.calculate(
                 1920, 1080, 640, 480, 0, 0.5f, 0.5f, 1.0f,
                 RenderTargetRole.PREVIEW);
 
         assertTrue(result.valid);
-        assertEquals(1.0f, result.fitScale, EPSILON);
-        assertEquals(640.0f, result.baseViewportWidth, EPSILON);
-        assertEquals(480.0f, result.baseViewportHeight, EPSILON);
-        assertEquals(640.0f / 1920.0f, result.logicalCropRect.width(), EPSILON);
-        assertEquals(480.0f / 1080.0f, result.logicalCropRect.height(), EPSILON);
+        assertEquals(1440.0f, result.baseViewportWidth, EPSILON);
+        assertEquals(1080.0f, result.baseViewportHeight, EPSILON);
+        assertEquals(1440.0f / 1920.0f, result.logicalCropRect.width(), EPSILON);
+        assertEquals(1.0f, result.logicalCropRect.height(), EPSILON);
+    }
+
+    @Test
+    public void hostOrientationDoesNotSwapRequestedCameraOutputAspect() {
+        RenderTargetGeometry.Calculation target = RenderTargetGeometry.calculate(
+                1600, 728, new HostWindowGeometry.Snapshot(1080, 2376, 0),
+                RenderTargetRole.PREVIEW);
+        VirtualSensorGeometry.Calculation result = VirtualSensorGeometry.calculate(
+                1920, 1080, 1600, 728, 0, 0.5f, 0.5f, 1.0f,
+                RenderTargetRole.PREVIEW);
+
+        assertTrue(target.orientationCompensated);
+        assertEquals(1600.0f / 728.0f, result.targetAspect, EPSILON);
+        assertEquals(1920.0f, result.baseViewportWidth, EPSILON);
+        assertEquals(1920.0f / (1600.0f / 728.0f), result.baseViewportHeight, EPSILON);
     }
 
     @Test
@@ -51,12 +64,12 @@ public class VirtualSensorGeometryTest {
                 1920, 1080, 640, 480, 0, 0.5f, 0.5f, 4.0f,
                 RenderTargetRole.PREVIEW);
 
-        assertEquals(640.0f / 1920.0f, zoomOne.logicalCropRect.width(), EPSILON);
-        assertEquals(480.0f / 1080.0f, zoomOne.logicalCropRect.height(), EPSILON);
-        assertEquals(320.0f / 1920.0f, zoomTwo.logicalCropRect.width(), EPSILON);
-        assertEquals(240.0f / 1080.0f, zoomTwo.logicalCropRect.height(), EPSILON);
-        assertEquals(160.0f / 1920.0f, zoomFour.logicalCropRect.width(), EPSILON);
-        assertEquals(120.0f / 1080.0f, zoomFour.logicalCropRect.height(), EPSILON);
+        assertEquals(1440.0f / 1920.0f, zoomOne.logicalCropRect.width(), EPSILON);
+        assertEquals(1.0f, zoomOne.logicalCropRect.height(), EPSILON);
+        assertEquals(720.0f / 1920.0f, zoomTwo.logicalCropRect.width(), EPSILON);
+        assertEquals(540.0f / 1080.0f, zoomTwo.logicalCropRect.height(), EPSILON);
+        assertEquals(360.0f / 1920.0f, zoomFour.logicalCropRect.width(), EPSILON);
+        assertEquals(270.0f / 1080.0f, zoomFour.logicalCropRect.height(), EPSILON);
     }
 
     @Test
@@ -68,11 +81,25 @@ public class VirtualSensorGeometryTest {
         assertTrue(result.valid);
         assertEquals(1920, result.logicalSensorWidth);
         assertEquals(1080, result.logicalSensorHeight);
-        assertEquals(1.0f, result.fitScale, EPSILON);
-        assertEquals(1600.0f, result.baseViewportWidth, EPSILON);
-        assertEquals(728.0f, result.baseViewportHeight, EPSILON);
-        assertEquals(1600.0f / 1920.0f, result.logicalCropRect.width(), EPSILON);
-        assertEquals(728.0f / 1080.0f, result.logicalCropRect.height(), EPSILON);
+        assertEquals(1920.0f, result.baseViewportWidth, EPSILON);
+        assertEquals(1920.0f / (1600.0f / 728.0f), result.baseViewportHeight, EPSILON);
+        assertEquals(1.0f, result.logicalCropRect.width(), EPSILON);
+        assertEquals((1920.0f / (1600.0f / 728.0f)) / 1080.0f,
+                result.logicalCropRect.height(), EPSILON);
+    }
+
+    @Test
+    public void allSourceRotationsKeepFiniteAspectSafeGeometry() {
+        for (int rotation : new int[] { 0, 90, 180, 270 }) {
+            VirtualSensorGeometry.Calculation result = VirtualSensorGeometry.calculate(
+                    1920, 1080, 640, 480, rotation, 0.5f, 0.5f, 1.0f,
+                    RenderTargetRole.PREVIEW);
+            assertTrue(result.valid);
+            assertTrue(Float.isFinite(result.baseViewportWidth));
+            assertTrue(Float.isFinite(result.baseViewportHeight));
+            assertTrue(Float.isFinite(result.logicalCropRect.width()));
+            assertTrue(Float.isFinite(result.logicalCropRect.height()));
+        }
     }
 
     @Test
@@ -95,10 +122,10 @@ public class VirtualSensorGeometryTest {
                 1920, 1080, 640, 480, 0, 0.0f, 1.0f, 1.0f,
                 RenderTargetRole.PREVIEW);
 
-        assertEquals(0.5f * (640.0f / 1920.0f), result.logicalAnchorU, EPSILON);
-        assertEquals(1.0f - 0.5f * (480.0f / 1080.0f), result.logicalAnchorV, EPSILON);
+        assertEquals(0.5f * (1440.0f / 1920.0f), result.logicalAnchorU, EPSILON);
+        assertEquals(0.5f, result.logicalAnchorV, EPSILON);
         assertEquals(0.0f, result.logicalCropRect.left, EPSILON);
-        assertEquals(1.0f - 480.0f / 1080.0f, result.logicalCropRect.top, EPSILON);
+        assertEquals(0.0f, result.logicalCropRect.top, EPSILON);
         assertEquals(1.0f, result.logicalCropRect.bottom, EPSILON);
     }
 

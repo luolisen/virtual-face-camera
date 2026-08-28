@@ -79,4 +79,25 @@ public class Camera1PreviewTransformTest {
         assertEquals(0.0f, sourceDelta[0], EPSILON);
         assertEquals(-0.1f, sourceDelta[1], EPSILON);
     }
+
+    @Test
+    public void deltaTransformsRoundTripWithoutEdgeClamping() {
+        int[] flags = {
+                Camera1PreviewTransform.IDENTITY,
+                Camera1PreviewTransform.FLIP_H,
+                Camera1PreviewTransform.FLIP_V,
+                Camera1PreviewTransform.ROT90,
+                Camera1PreviewTransform.ROT180,
+                Camera1PreviewTransform.ROT270,
+                Camera1PreviewTransform.FLIP_H | Camera1PreviewTransform.ROT90,
+                Camera1PreviewTransform.FLIP_V | Camera1PreviewTransform.ROT90
+        };
+        for (int flag : flags) {
+            float[] displayed = Camera1PreviewTransform.forwardDelta(0.07f, -0.04f, flag);
+            float[] source = Camera1PreviewTransform.inverseDelta(
+                    displayed[0], displayed[1], flag);
+            assertEquals(0.07f, source[0], EPSILON);
+            assertEquals(-0.04f, source[1], EPSILON);
+        }
+    }
 }

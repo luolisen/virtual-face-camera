@@ -34,9 +34,9 @@ public final class RenderTargetGeometry {
     }
 
     /**
-     * Keep the raw EGL target as the only rendering target. Host window
-     * geometry is retained in the result strictly for diagnostics; it must
-     * never rewrite a Camera buffer's aspect.
+     * Keep the raw EGL target as the actual GL viewport while allowing a
+     * visible preview to use the host window's logical orientation for aspect
+     * math. Reader/capture consumers always retain raw buffer geometry.
      */
     public static Calculation calculate(int rawTargetWidth, int rawTargetHeight,
             HostWindowGeometry.Snapshot hostGeometry, RenderTargetRole role) {
@@ -47,12 +47,23 @@ public final class RenderTargetGeometry {
                 ? HostWindowGeometry.UNKNOWN_ROTATION
                 : hostGeometry.getDisplayRotation();
 
-        // Do not infer Camera Surface orientation from Activity/window
-        // orientation. The host may apply its own later transform (for
-        // example, a portrait UI backed by a 1600x728 buffer).
         boolean orientationCompensated = false;
         int logicalTargetWidth = rawTargetWidth;
         int logicalTargetHeight = rawTargetHeight;
+        if (effectiveRole == RenderTargetRole.PREVIEW
+                && rawTargetWidth > 0 && rawTargetHeight > 0
+                && hostGeometry != null && hostGeometry.isAvailable()) {
+            boolean rawLandscape = rawTargetWidth > rawTargetHeight;
+            boolean rawPortrait = rawTargetHeight > rawTargetWidth;
+            boolean hostLandscape = hostWidth > hostHeight;
+            boolean hostPortrait = hostHeight > hostWidth;
+            orientationCompensated = (rawLandscape && hostPortrait)
+                    || (rawPortrait && hostLandscape);
+            if (orientationCompensated) {
+                logicalTargetWidth = rawTargetHeight;
+                logicalTargetHeight = rawTargetWidth;
+            }
+        }
 
         return new Calculation(effectiveRole,
                 rawTargetWidth, rawTargetHeight,

@@ -67,20 +67,26 @@ public final class ViewportCommandController {
             logical[1] = geometry.logicalAnchorV;
         }
 
-        float[] display = Camera1PreviewTransform.forwardPoint(
-                logical[0], logical[1], previewTransformFlags);
         float delta = safeStep / 100.0f;
+        float displayDeltaU = 0.0f;
+        float displayDeltaV = 0.0f;
         if (IpcContract.VIEWPORT_COMMAND_UP.equals(command)) {
-            display[1] -= delta;
+            displayDeltaV = -delta;
         } else if (IpcContract.VIEWPORT_COMMAND_DOWN.equals(command)) {
-            display[1] += delta;
+            displayDeltaV = delta;
         } else if (IpcContract.VIEWPORT_COMMAND_LEFT.equals(command)) {
-            display[0] -= delta;
+            displayDeltaU = -delta;
         } else if (IpcContract.VIEWPORT_COMMAND_RIGHT.equals(command)) {
-            display[0] += delta;
+            displayDeltaU = delta;
         }
-        float[] movedLogical = Camera1PreviewTransform.inversePoint(
-                display[0], display[1], previewTransformFlags);
+        // Arrow commands are vectors. Transform the delta directly so edge
+        // clamping of an absolute point cannot change its direction.
+        float[] logicalDelta = Camera1PreviewTransform.inverseDelta(
+                displayDeltaU, displayDeltaV, previewTransformFlags);
+        float[] movedLogical = {
+                logical[0] + logicalDelta[0],
+                logical[1] + logicalDelta[1]
+        };
         if (geometry.valid) {
             float normalizedViewportWidth = geometry.viewportWidth
                     / (float) geometry.logicalSensorWidth;

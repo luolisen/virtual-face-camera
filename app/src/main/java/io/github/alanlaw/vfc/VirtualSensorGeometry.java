@@ -3,12 +3,13 @@ package io.github.alanlaw.vfc;
 import java.util.Locale;
 
 /**
- * Pure geometry model for the Dynamic v2 requested-footprint renderer.
+ * Pure geometry model for the Dynamic v3 requested-output renderer.
  *
  * <p>Persistent anchors are stored in decoded-source space. The source is
- * first rotated into the VFC virtual canvas, then the requested camera
- * footprint is fitted into that canvas, and finally the viewport is zoomed
- * and clamped around the anchor. No host-window dimensions are involved.</p>
+ * first rotated into the VFC virtual canvas, then the requested output aspect
+ * selects the largest same-aspect viewport in that canvas. The viewport is
+ * finally zoomed and clamped around the anchor. Requested pixel dimensions
+ * describe the output buffer, not a source-pixel crop.</p>
  */
 public final class VirtualSensorGeometry {
     private static final float CENTER = 0.5f;
@@ -62,7 +63,6 @@ public final class VirtualSensorGeometry {
         public final float logicalAnchorU;
         public final float logicalAnchorV;
         public final float zoom;
-        public final float fitScale;
         public final float baseViewportWidth;
         public final float baseViewportHeight;
         public final float viewportWidth;
@@ -78,7 +78,7 @@ public final class VirtualSensorGeometry {
                 float sourceAspect, float targetAspect,
                 float sourceAnchorU, float sourceAnchorV,
                 float logicalAnchorU, float logicalAnchorV,
-                float zoom, float fitScale,
+                float zoom,
                 float baseViewportWidth, float baseViewportHeight,
                 float viewportWidth, float viewportHeight,
                 NormalizedRect logicalCropRect, NormalizedRect sourceCropRect,
@@ -98,7 +98,6 @@ public final class VirtualSensorGeometry {
             this.logicalAnchorU = logicalAnchorU;
             this.logicalAnchorV = logicalAnchorV;
             this.zoom = zoom;
-            this.fitScale = fitScale;
             this.baseViewportWidth = baseViewportWidth;
             this.baseViewportHeight = baseViewportHeight;
             this.viewportWidth = viewportWidth;
@@ -128,7 +127,7 @@ public final class VirtualSensorGeometry {
     }
 
     /**
-     * Calculate Dynamic v2 geometry using a requested output footprint.
+     * Calculate Dynamic v3 geometry using a requested output aspect.
      * {@code requestedWidth/Height} are not swapped for producer orientation.
      */
     public static Calculation calculate(int sourceWidth, int sourceHeight,
@@ -159,20 +158,24 @@ public final class VirtualSensorGeometry {
                     Math.max(0, requestedWidth), Math.max(0, requestedHeight),
                     1.0f, 1.0f, safeSourceU, safeSourceV,
                     logicalAnchor[0], logicalAnchor[1],
-                    sanitizeZoom(zoom), 1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                    sanitizeZoom(zoom), 0.0f, 0.0f, 0.0f, 0.0f,
                     full, full, false);
         }
 
         float sourceAspect = logicalWidth / (float) logicalHeight;
         float targetAspect = requestedWidth / (float) requestedHeight;
-        float fitScale = Math.min(1.0f, Math.min(
-                logicalWidth / (float) requestedWidth,
-                logicalHeight / (float) requestedHeight));
-        float baseWidth = requestedWidth * fitScale;
-        float baseHeight = requestedHeight * fitScale;
+        float baseWidth;
+        float baseHeight;
+        if (sourceAspect > targetAspect) {
+            baseHeight = logicalHeight;
+            baseWidth = logicalHeight * targetAspect;
+        } else {
+            baseWidth = logicalWidth;
+            baseHeight = logicalWidth / targetAspect;
+        }
         float safeZoom = sanitizeZoom(zoom);
-        float viewportWidth = Math.min(logicalWidth, baseWidth / safeZoom);
-        float viewportHeight = Math.min(logicalHeight, baseHeight / safeZoom);
+        float viewportWidth = baseWidth / safeZoom;
+        float viewportHeight = baseHeight / safeZoom;
         float normalizedViewportWidth = clampUnit(viewportWidth / logicalWidth);
         float normalizedViewportHeight = clampUnit(viewportHeight / logicalHeight);
         float logicalCenterU = clampCenter(logicalAnchor[0], normalizedViewportWidth);
@@ -185,13 +188,13 @@ public final class VirtualSensorGeometry {
                 sourceWidth, sourceHeight, normalizedRotation,
                 logicalWidth, logicalHeight, requestedWidth, requestedHeight,
                 sourceAspect, targetAspect, safeSourceU, safeSourceV,
-                logicalCenterU, logicalCenterV, safeZoom, fitScale,
+                logicalCenterU, logicalCenterV, safeZoom,
                 baseWidth, baseHeight, viewportWidth, viewportHeight,
                 logicalCrop, sourceCrop, true);
     }
 
     /**
-     * Build the old crop-only matrix used by FIT/CROP. Dynamic v2 uses
+     * Build the crop-only matrix used by FIT/CROP. Dynamic v3 uses
      * {@link #buildDynamicTextureMatrix(Calculation)} instead.
      */
     public static float[] buildTextureCropMatrix(NormalizedRect sourceCropRect) {
@@ -209,7 +212,7 @@ public final class VirtualSensorGeometry {
     }
 
     /**
-     * Build output-UV to decoded-source-UV mapping for Dynamic v2.
+     * Build output-UV to decoded-source-UV mapping for Dynamic v3.
      *
      * <p>The matrix is intended for
      * {@code uSTMatrix * uDynamicTextureMatrix * aTextureCoord}. Its
@@ -218,12 +221,24 @@ public final class VirtualSensorGeometry {
      */
     public static float[] buildDynamicTextureMatrix(Calculation calculation) {
         float[] matrix = new float[16];
+        buildDynamicTextureMatrix(calculation, matrix);
+        return matrix;
+    }
+
+    /** Fill a caller-owned matrix so the render hot path does not allocate. */
+    public static void buildDynamicTextureMatrix(Calculation calculation, float[] matrix) {
+        if (matrix == null || matrix.length < 16) {
+            return;
+        }
+        for (int i = 0; i < 16; i++) {
+            matrix[i] = 0.0f;
+        }
         if (calculation == null || !calculation.valid) {
             matrix[0] = 1.0f;
             matrix[5] = 1.0f;
             matrix[10] = 1.0f;
             matrix[15] = 1.0f;
-            return matrix;
+            return;
         }
 
         NormalizedRect logical = calculation.logicalCropRect;
@@ -262,7 +277,6 @@ public final class VirtualSensorGeometry {
         }
         matrix[10] = 1.0f;
         matrix[15] = 1.0f;
-        return matrix;
     }
 
     /** Clamp a logical anchor to the movable area of a normalized viewport. */

@@ -392,14 +392,18 @@ public final class Camera2SessionHook {
             return;
         }
         MediaPlayerManager pm = HookMain.playerManager;
-        if (pm.c2_renderer != null) pm.c2_renderer.setRotation(0);
-        if (pm.c2_renderer_1 != null) pm.c2_renderer_1.setRotation(0);
-        if (pm.c2_relay != null) pm.c2_relay.setRotation(0);
-        if (pm.c2_relay_1 != null) pm.c2_relay_1.setRotation(0);
-        if (pm.c2_reader_renderer != null) pm.c2_reader_renderer.setRotation(0);
-        if (pm.c2_reader_renderer_1 != null) pm.c2_reader_renderer_1.setRotation(0);
-        if (pm.c2_reader_relay != null) pm.c2_reader_relay.setRotation(0);
-        if (pm.c2_reader_relay_1 != null) pm.c2_reader_relay_1.setRotation(0);
+        if (pm.c2_renderer != null) pm.c2_renderer.applyState(pm.c2_renderer.getState().withRotation(0));
+        if (pm.c2_renderer_1 != null) pm.c2_renderer_1.applyState(pm.c2_renderer_1.getState().withRotation(0));
+        if (pm.c2_relay != null) pm.c2_relay.applyState(pm.c2_relay.getState().withRotation(0));
+        if (pm.c2_relay_1 != null) pm.c2_relay_1.applyState(pm.c2_relay_1.getState().withRotation(0));
+        if (pm.c2_reader_renderer != null) pm.c2_reader_renderer.applyState(
+                pm.c2_reader_renderer.getState().withRotation(0));
+        if (pm.c2_reader_renderer_1 != null) pm.c2_reader_renderer_1.applyState(
+                pm.c2_reader_renderer_1.getState().withRotation(0));
+        if (pm.c2_reader_relay != null) pm.c2_reader_relay.applyState(
+                pm.c2_reader_relay.getState().withRotation(0));
+        if (pm.c2_reader_relay_1 != null) pm.c2_reader_relay_1.applyState(
+                pm.c2_reader_relay_1.getState().withRotation(0));
         LogUtil.log("【CS】YUV bridge 预览渲染器旋转保持 0°，偏移由 YUV/JPEG 截帧路径应用");
     }
 
@@ -2032,7 +2036,7 @@ public final class Camera2SessionHook {
         LogUtil.log("【CS】MediaCodec YUV 解码器已启动");
     }
 
-    /** 媒体源变更时重启解码器（切换视频/旋转等） */
+    /** 仅在媒体源变更时重启 YUV 解码器；旋转和取景配置走 renderer-only 路径。 */
     public void restartYuvDecoderForSourceChange() {
         MediaCodecYuvDecoder dec = yuvDecoder;
         if (dec != null) {

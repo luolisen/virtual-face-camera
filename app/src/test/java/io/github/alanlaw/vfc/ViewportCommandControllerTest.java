@@ -47,7 +47,7 @@ public class ViewportCommandControllerTest {
     @Test
     public void arrowCommandUsesDisplayedDeltaThroughRotatedProducer() {
         ViewportCommandController.Result result = ViewportCommandController.apply(
-                viewport(0.5f, 0.5f, 1.0f), IpcContract.VIEWPORT_COMMAND_RIGHT,
+                viewport(0.5f, 0.5f, 2.0f), IpcContract.VIEWPORT_COMMAND_RIGHT,
                 0, Camera1PreviewTransform.ROT90,
                 1920, 1080, 640, 480, 10);
 
@@ -89,14 +89,57 @@ public class ViewportCommandControllerTest {
     @Test
     public void arrowCommandClampsToTheEffectiveViewport() {
         ViewportCommandController.Result result = ViewportCommandController.apply(
-                viewport(0.9583333f, 0.5f, 4.0f), IpcContract.VIEWPORT_COMMAND_RIGHT,
+                viewport(0.90625f, 0.5f, 4.0f), IpcContract.VIEWPORT_COMMAND_RIGHT,
                 0, Camera1PreviewTransform.IDENTITY,
                 1920, 1080, 640, 480, 10);
 
         assertFalse(result.isChanged());
-        assertEquals(0.9583333f, result.getViewport().getAnchorU(), EPSILON);
+        assertEquals(0.90625f, result.getViewport().getAnchorU(), EPSILON);
         assertEquals(0.5f, result.getViewport().getAnchorV(), EPSILON);
         assertEquals(4.0f, result.getViewport().getZoom(), EPSILON);
+    }
+
+    @Test
+    public void allVfcAndProducerTransformsPreserveDisplayDirection() {
+        int[] rotations = { 0, 90, 180, 270 };
+        int[] transforms = {
+                Camera1PreviewTransform.IDENTITY,
+                Camera1PreviewTransform.FLIP_H,
+                Camera1PreviewTransform.FLIP_V,
+                Camera1PreviewTransform.ROT90,
+                Camera1PreviewTransform.ROT180,
+                Camera1PreviewTransform.ROT270,
+                Camera1PreviewTransform.FLIP_H | Camera1PreviewTransform.ROT90,
+                Camera1PreviewTransform.FLIP_V | Camera1PreviewTransform.ROT90
+        };
+        String[] commands = {
+                IpcContract.VIEWPORT_COMMAND_UP,
+                IpcContract.VIEWPORT_COMMAND_DOWN,
+                IpcContract.VIEWPORT_COMMAND_LEFT,
+                IpcContract.VIEWPORT_COMMAND_RIGHT
+        };
+        for (int rotation : rotations) {
+            for (int transform : transforms) {
+                for (String command : commands) {
+                    ViewportCommandController.Result result = ViewportCommandController.apply(
+                            viewport(0.5f, 0.5f, 2.0f), command, rotation, transform,
+                            1920, 1080, 1920, 1080, 5);
+                    float displayDeltaU = IpcContract.VIEWPORT_COMMAND_LEFT.equals(command)
+                            ? -0.05f
+                            : IpcContract.VIEWPORT_COMMAND_RIGHT.equals(command) ? 0.05f : 0.0f;
+                    float displayDeltaV = IpcContract.VIEWPORT_COMMAND_UP.equals(command)
+                            ? -0.05f
+                            : IpcContract.VIEWPORT_COMMAND_DOWN.equals(command) ? 0.05f : 0.0f;
+                    float[] logicalDelta = Camera1PreviewTransform.inverseDelta(
+                            displayDeltaU, displayDeltaV, transform);
+                    float[] logical = VirtualSensorTransform.sourceToLogical(
+                            result.getViewport().getAnchorU(),
+                            result.getViewport().getAnchorV(), rotation);
+                    assertEquals(0.5f + logicalDelta[0], logical[0], EPSILON);
+                    assertEquals(0.5f + logicalDelta[1], logical[1], EPSILON);
+                }
+            }
+        }
     }
 
     @Test

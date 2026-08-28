@@ -7,6 +7,9 @@ import android.view.Surface;
 import io.github.alanlaw.vfc.utils.LogUtil;
 import io.github.alanlaw.vfc.utils.VideoManager;
 
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+
 /**
  * Manages all player backends, GLVideoRenderer, and SurfaceRelay instances.
  * Centralizes player lifecycle, restart, rotation, and release logic.
@@ -27,6 +30,10 @@ public final class MediaPlayerManager {
             ConfigManager.DEFAULT_VIEWPORT_MOVE_STEP_PERCENT;
     private volatile HostWindowGeometry.Snapshot currentHostWindowGeometry =
             HostWindowGeometry.Snapshot.unavailable();
+    private final ConcurrentMap<String, PlayerSlotGeneration> slotGenerations =
+            new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, MediaPlayer> activeSlotPlayers =
+            new ConcurrentHashMap<>();
 
     // ---- Camera1 players (created by Camera1Handler) ----
     MediaPlayer mplayer1;
@@ -337,8 +344,8 @@ public final class MediaPlayerManager {
             } else {
                 // Local mode: restart individual MediaPlayers
                 VideoManager.checkProviderAvailability();
-                restartSinglePlayer(mplayer1, c1_renderer_holder, null, "mplayer1");
-                restartSinglePlayer(mMediaPlayer, c1_renderer_texture, null, "mMediaPlayer");
+                restartSinglePlayer(mplayer1, c1_renderer_holder, null, "c1_holder");
+                restartSinglePlayer(mMediaPlayer, c1_renderer_texture, null, "c1_texture");
                 restartSinglePlayer(c2_reader_player, c2_reader_renderer, c2_reader_relay, "c2_reader_player");
                 restartSinglePlayer(c2_reader_player_1, c2_reader_renderer_1, c2_reader_relay_1,
                         "c2_reader_player_1");
@@ -350,33 +357,133 @@ public final class MediaPlayerManager {
 
     private void restartSinglePlayer(MediaPlayer player, GLVideoRenderer renderer,
             SurfaceRelay relay, String tag) {
-        if (player == null)
+        preparePlayerAsync(player, renderer, relay, tag, null);
+    }
+
+    /** Prepare a Camera1 slot asynchronously while retaining its GL input Surface. */
+    void prepareCamera1Player(MediaPlayer player, GLVideoRenderer renderer, String tag,
+            Surface fallbackSurface) {
+        preparePlayerAsync(player, renderer, null, tag, fallbackSurface);
+    }
+
+    /** Invalidate callbacks from a player which is being detached or released. */
+    void invalidatePlayerSlot(String tag) {
+        if (tag == null) {
             return;
+        }
+        generationFor(tag).begin();
+        activeSlotPlayers.remove(tag);
+    }
+
+    private void preparePlayerAsync(MediaPlayer player, GLVideoRenderer renderer,
+            SurfaceRelay relay, String tag, Surface fallbackSurface) {
+        if (player == null || tag == null) {
+            return;
+        }
+        PlayerSlotGeneration gate = generationFor(tag);
+        long generation = gate.begin();
+        activeSlotPlayers.put(tag, player);
+        long startedAt = SystemClock.elapsedRealtime();
+        String videoName = VideoManager.getConfig().getString(
+                ConfigManager.KEY_SELECTED_VIDEO, "");
         try {
-            if (player.isPlaying())
-                player.stop();
             player.reset();
             player.setVolume(0f, 0f);
+            player.setLooping(true);
             if (renderer != null && renderer.isInitialized()) {
                 player.setSurface(renderer.getInputSurface());
-            }
-            if (relay != null && relay.isInitialized() && (renderer == null || !renderer.isInitialized())) {
+            } else if (relay != null && relay.isInitialized()) {
                 player.setSurface(relay.getInputSurface());
+            } else if (fallbackSurface != null) {
+                player.setSurface(fallbackSurface);
             }
-            bindVideoSizeListener(player, renderer, relay);
+            bindVideoSizeListener(player, renderer, relay, tag, generation, gate, startedAt);
+            player.setOnPreparedListener(mp -> {
+                if (!isCurrentPlayer(tag, generation, gate, mp)) {
+                    logPlayerSwitch(tag, generation, videoName, "stale", startedAt);
+                    return;
+                }
+                try {
+                    logPlayerSwitch(tag, generation, videoName, "prepared", startedAt);
+                    updateVideoSizeFromPlayer(mp, renderer, relay);
+                    if (!isCurrentPlayer(tag, generation, gate, mp)) {
+                        logPlayerSwitch(tag, generation, videoName, "stale", startedAt);
+                        return;
+                    }
+                    mp.start();
+                    HookMain.is_someone_playing = true;
+                    markCamera2PlaybackStarted(mp, tag);
+                    logPlayerSwitch(tag, generation, videoName, "start", startedAt);
+                } catch (IllegalStateException e) {
+                    LogUtil.log("[VFC][PlayerSwitch] slot=" + tag
+                            + " generation=" + generation + " action=error state=prepared"
+                            + " source=" + videoName + " error=" + e);
+                }
+            });
+            player.setOnErrorListener((mp, what, extra) -> {
+                if (isCurrentPlayer(tag, generation, gate, mp)) {
+                    LogUtil.log("[VFC][PlayerSwitch] slot=" + tag
+                            + " generation=" + generation + " action=error source="
+                            + videoName + " what=" + what + " extra=" + extra);
+                    activeSlotPlayers.remove(tag, mp);
+                }
+                return true;
+            });
             android.os.ParcelFileDescriptor pfd = VideoManager.getVideoPFD();
             if (pfd != null) {
-                player.setDataSource(pfd.getFileDescriptor());
-                pfd.close();
+                try {
+                    player.setDataSource(pfd.getFileDescriptor());
+                } finally {
+                    pfd.close();
+                }
             } else {
                 player.setDataSource(getVideoPath());
             }
-            player.prepare();
-            updateVideoSizeFromPlayer(player, renderer, relay);
-            player.start();
+            logPlayerSwitch(tag, generation, videoName, "prepareAsync", startedAt);
+            player.prepareAsync();
+        } catch (IllegalStateException e) {
+            clearActivePlayerIfCurrent(tag, generation, gate, player);
+            LogUtil.log("[VFC][PlayerSwitch] slot=" + tag
+                    + " generation=" + generation + " action=error source="
+                    + videoName + " elapsedMs="
+                    + (SystemClock.elapsedRealtime() - startedAt) + " error=" + e);
         } catch (Exception e) {
-            LogUtil.log("【CS】重启 " + tag + " 失败: " + android.util.Log.getStackTraceString(e));
+            clearActivePlayerIfCurrent(tag, generation, gate, player);
+            LogUtil.log("[VFC][PlayerSwitch] slot=" + tag
+                    + " generation=" + generation + " action=error source="
+                    + videoName + " elapsedMs="
+                    + (SystemClock.elapsedRealtime() - startedAt) + " error=" + e);
         }
+    }
+
+    private PlayerSlotGeneration generationFor(String tag) {
+        PlayerSlotGeneration existing = slotGenerations.get(tag);
+        if (existing != null) {
+            return existing;
+        }
+        PlayerSlotGeneration created = new PlayerSlotGeneration();
+        PlayerSlotGeneration raced = slotGenerations.putIfAbsent(tag, created);
+        return raced == null ? created : raced;
+    }
+
+    private boolean isCurrentPlayer(String tag, long generation,
+            PlayerSlotGeneration gate, MediaPlayer player) {
+        return gate.isCurrent(generation) && activeSlotPlayers.get(tag) == player;
+    }
+
+    private void clearActivePlayerIfCurrent(String tag, long generation,
+            PlayerSlotGeneration gate, MediaPlayer player) {
+        if (gate.isCurrent(generation)) {
+            activeSlotPlayers.remove(tag, player);
+        }
+    }
+
+    private void logPlayerSwitch(String tag, long generation, String videoName,
+            String action, long startedAt) {
+        LogUtil.log("[VFC][PlayerSwitch] slot=" + tag
+                + " generation=" + generation + " action=" + action
+                + " video=" + videoName + " elapsedMs="
+                + (SystemClock.elapsedRealtime() - startedAt));
     }
 
     /** Apply a live rotation update to every active GL output. */
@@ -391,6 +498,15 @@ public final class MediaPlayerManager {
         currentAspectMode = normalizeAspectMode(aspectMode);
         applyRenderingConfigToAllRenderers();
         LogUtil.log("【CS】画面适配已实时应用: " + currentAspectMode);
+    }
+
+    /** Apply rotation and aspect changes as one renderer-state publication. */
+    void updateRenderingConfig(int degrees, String aspectMode) {
+        currentRotationDegrees = normalizeRotation(degrees);
+        currentAspectMode = normalizeAspectMode(aspectMode);
+        applyRenderingConfigToAllRenderers();
+        LogUtil.log("【CS】渲染配置已实时应用到渲染器: rotation="
+                + currentRotationDegrees + "° aspect=" + currentAspectMode);
     }
 
     /** Apply a live dynamic viewport update without restarting any player. */
@@ -466,16 +582,16 @@ public final class MediaPlayerManager {
 
     private void applyRenderingConfig(GLVideoRenderer renderer, SurfaceRelay relay) {
         if (renderer != null) {
-            renderer.setRotation(currentRotationDegrees);
-            renderer.setAspectMode(currentAspectMode);
-            renderer.setHostWindowGeometry(currentHostWindowGeometry);
-            renderer.setViewportState(currentActiveBinding, currentViewportMoveStepPercent);
+            RendererState next = renderer.getState().withRenderConfiguration(
+                    currentRotationDegrees, currentAspectMode, currentActiveBinding,
+                    currentViewportMoveStepPercent, currentHostWindowGeometry);
+            renderer.applyState(next);
         }
         if (relay != null) {
-            relay.setRotation(currentRotationDegrees);
-            relay.setAspectMode(currentAspectMode);
-            relay.setHostWindowGeometry(currentHostWindowGeometry);
-            relay.setViewportState(currentActiveBinding, currentViewportMoveStepPercent);
+            RendererState next = relay.getState().withRenderConfiguration(
+                    currentRotationDegrees, currentAspectMode, currentActiveBinding,
+                    currentViewportMoveStepPercent, currentHostWindowGeometry);
+            relay.applyState(next);
         }
     }
 
@@ -505,6 +621,18 @@ public final class MediaPlayerManager {
         player.setOnVideoSizeChangedListener((mp, width, height) -> setSourceSize(renderer, relay, width, height));
     }
 
+    private void bindVideoSizeListener(MediaPlayer player, GLVideoRenderer renderer,
+            SurfaceRelay relay, String tag, long generation, PlayerSlotGeneration gate,
+            long startedAt) {
+        player.setOnVideoSizeChangedListener((mp, width, height) -> {
+            if (isCurrentPlayer(tag, generation, gate, mp)) {
+                setSourceSize(renderer, relay, width, height);
+            } else {
+                logPlayerSwitch(tag, generation, width + "x" + height, "stale", startedAt);
+            }
+        });
+    }
+
     private void updateVideoSizeFromPlayer(MediaPlayer player, GLVideoRenderer renderer, SurfaceRelay relay) {
         try {
             setSourceSize(renderer, relay, player.getVideoWidth(), player.getVideoHeight());
@@ -514,6 +642,12 @@ public final class MediaPlayerManager {
 
     /** Release all GL renderers. */
     void releaseAllRenderers() {
+        invalidatePlayerSlot("c2_reader_player");
+        invalidatePlayerSlot("c2_reader_player_1");
+        invalidatePlayerSlot("c2_player");
+        invalidatePlayerSlot("c2_player_1");
+        invalidatePlayerSlot("c1_holder");
+        invalidatePlayerSlot("c1_texture");
         GLVideoRenderer.releaseSafely(c2_reader_renderer);
         c2_reader_renderer = null;
         GLVideoRenderer.releaseSafely(c2_reader_renderer_1);
@@ -530,6 +664,8 @@ public final class MediaPlayerManager {
 
     /** Release Camera1 players and renderers (called from stopPreview/release). */
     void releaseCamera1Resources() {
+        invalidatePlayerSlot("c1_holder");
+        invalidatePlayerSlot("c1_texture");
         GLVideoRenderer.releaseSafely(c1_renderer_holder);
         c1_renderer_holder = null;
         GLVideoRenderer.releaseSafely(c1_renderer_texture);
@@ -542,6 +678,10 @@ public final class MediaPlayerManager {
 
     /** Release Camera2 players and renderers (called from onOpened). */
     void releaseCamera2Resources() {
+        invalidatePlayerSlot("c2_player");
+        invalidatePlayerSlot("c2_player_1");
+        invalidatePlayerSlot("c2_reader_player");
+        invalidatePlayerSlot("c2_reader_player_1");
         releaseStreamBackend();
         GLVideoRenderer.releaseSafely(c2_renderer);
         c2_renderer = null;

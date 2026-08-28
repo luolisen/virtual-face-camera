@@ -105,16 +105,43 @@ public final class Camera1PreviewTransform {
 
     /** Map a display-space delta into source-space delta. */
     public static float[] inverseDelta(float deltaU, float deltaV, int flags) {
-        float[] center = inversePoint(0.5f, 0.5f, flags);
-        float[] moved = inversePoint(0.5f + deltaU, 0.5f + deltaV, flags);
-        return new float[] { moved[0] - center[0], moved[1] - center[1] };
+        if (!isValid(flags)) {
+            return new float[] { deltaU, deltaV };
+        }
+        float sourceU = deltaU;
+        float sourceV = deltaV;
+        if ((flags & ROT90) != 0) {
+            sourceU = deltaV;
+            sourceV = -deltaU;
+        }
+        if ((flags & FLIP_H) != 0) {
+            sourceU = -sourceU;
+        }
+        if ((flags & FLIP_V) != 0) {
+            sourceV = -sourceV;
+        }
+        return new float[] { sourceU, sourceV };
     }
 
     /** Map a source-space delta into displayed delta. */
     public static float[] forwardDelta(float deltaU, float deltaV, int flags) {
-        float[] center = forwardPoint(0.5f, 0.5f, flags);
-        float[] moved = forwardPoint(0.5f + deltaU, 0.5f + deltaV, flags);
-        return new float[] { moved[0] - center[0], moved[1] - center[1] };
+        if (!isValid(flags)) {
+            return new float[] { deltaU, deltaV };
+        }
+        float displayedU = deltaU;
+        float displayedV = deltaV;
+        if ((flags & FLIP_H) != 0) {
+            displayedU = -displayedU;
+        }
+        if ((flags & FLIP_V) != 0) {
+            displayedV = -displayedV;
+        }
+        if ((flags & ROT90) != 0) {
+            float rotatedU = -displayedV;
+            displayedV = displayedU;
+            displayedU = rotatedU;
+        }
+        return new float[] { displayedU, displayedV };
     }
 
     private static float clampUnit(float value) {
